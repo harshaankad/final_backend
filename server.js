@@ -20,7 +20,7 @@ app.use(cookieParser());
 // CORS configuration
 const allowedOrigins = [
   "http://localhost:3000",      // Local testing
-  "https://ankad.in"            // Your live frontend
+  "https://www.ankad.in"            // Your live frontend
 ];
 
 app.use(cors({
