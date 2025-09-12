@@ -79,6 +79,7 @@ exports.verifyOtp = async (req, res) => {
 
     res.status(201).json({ message: "Signup successful!", doctorId: newDoctor._id });
   } catch (error) {
+    console.error("Error in verifyOtp:", error);
     res.status(500).json({ error: "Error verifying OTP." });
   }
 }; // ✅ Correctly closing verifyOtp function
@@ -171,3 +172,21 @@ exports.changePassword = async (req, res) => {
 };
 
 
+exports.logoutController = async (req, res) => {
+  
+  console.log("Logout api called");
+  
+  try {
+    res.status(200).json({
+      success: true,
+      message: 'Logged out successfully',
+    });
+
+  } catch (error) {
+    console.error('Logout error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Logout failed',
+    });
+  }
+};

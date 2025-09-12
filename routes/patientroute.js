@@ -9,6 +9,6 @@ router.post("/create-patient", auth, isDoctor, createPatient);
 router.get("/all-patients", auth, isDoctor, getAllPatients);
 router.get("/pending-patients", auth, isDoctor, getPendingPatients);
 router.get("/done-patients", auth, isDoctor, getDonePatients);
-router.get("/patient-details/:patientId", auth, isDoctor, getPatientDetails);
+router.get("/patient-details/:patientId", auth, getPatientDetails);
 
 module.exports = router;

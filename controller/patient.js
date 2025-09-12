@@ -5,60 +5,85 @@ const mongoose = require("mongoose");
 
 
 exports.createPatient = async (req, res) => {
-    try {
-        console.log("Create Patient api hit");
-        // Extract doctor ID from request
-        const doctorId = req.doctorId;
-        console.log("Doctor ID : ",doctorId);
+  try {
+    console.log("Create Patient API hit");
 
-        // Extract patient details from request body
-        const { firstname, lastname, age, gender, duration, siteOfInfection, previousTreatment } = req.body;
+    // Extract doctor ID (set from auth middleware)
+    const doctorId = req.doctorId;
+    console.log("Doctor ID:", doctorId);
 
-        console.log("Basic Details: " ,firstname, lastname, age, gender, duration, siteOfInfection, previousTreatment);
+    // Extract patient details
+    const { firstname, lastname, age, gender, duration, siteOfInfection, previousTreatment } = req.body;
+    console.log("Basic Details:", firstname, lastname, age, gender, duration, siteOfInfection, previousTreatment);
 
-        console.log("Uploaded Files:", req.files);
+    console.log("Uploaded Files:", req.files);
 
-        //Check if all required fields are provided
-        if (!firstname || !lastname || !gender || !age || !duration || !siteOfInfection || !previousTreatment ||  !req.files || !req.files.nakedEyePhoto || !req.files.dermoscopePhoto) {
-            return res.status(400).json({
-                success: false,
-                message: "All fields and images are required.",
-            });
-        }
-
-        // Upload both images to Cloudinary
-const nakedEyePhoto = await uploadImageToCloudinary(req.files.nakedEyePhoto, "patients");
-const dermoscopePhoto = await uploadImageToCloudinary(req.files.dermoscopePhoto, "patients");
-
-        // Create new patient entry
-const newPatient = await Patient.create({
-    doctor: doctorId, // Assign doctor ID correctly
-    firstname,
-    lastname,
-    age,
-    gender,
-    duration,
-    siteOfInfection,
-    previousTreatment,
-    nakedEyePhoto: nakedEyePhoto.secure_url, // Match schema field
-    dermoscopePhoto: dermoscopePhoto.secure_url, // Match schema field
-    status: "pending", // Default status
-    paymentStatus: "pending", // Default payment status
-    amountPaid: 0, // Default amount
-});
-        res.status(201).json({
-            success: true,
-            message: "Patient created successfully.",
-            data: newPatient,
-        });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({
-            success: false,
-            message: "Error creating patient.",
-            error: error.message,
-        });
+    // Validate required fields
+    if (
+      !firstname ||
+      !lastname ||
+      !gender ||
+      !age ||
+      !duration ||
+      !siteOfInfection ||
+      !previousTreatment ||
+      !req.files ||
+      !req.files.nakedEyePhoto ||
+      !req.files.dermoscopePhotos
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "All fields and images are required.",
+      });
     }
+
+    // ✅ Upload naked eye photo (single file)
+    const nakedEyeUpload = await uploadImageToCloudinary(req.files.nakedEyePhoto, "patients");
+
+    // ✅ Handle dermoscope photos (could be single file or multiple)
+    let dermoscopeFiles = req.files.dermoscopePhotos;
+    if (!Array.isArray(dermoscopeFiles)) {
+      dermoscopeFiles = [dermoscopeFiles]; // wrap single into array
+    }
+
+    // Upload all dermoscope photos
+    const dermoscopeUploads = await Promise.all(
+      dermoscopeFiles.map((file) => uploadImageToCloudinary(file, "patients"))
+    );
+
+    // Extract URLs
+    const dermoscopePhotoUrls = dermoscopeUploads.map((img) => img.secure_url);
+
+    // ✅ Create new patient
+    const newPatient = await Patient.create({
+      doctor: doctorId,
+      firstname,
+      lastname,
+      age,
+      gender,
+      duration,
+      siteOfInfection,
+      previousTreatment,
+      nakedEyePhoto: nakedEyeUpload.secure_url,
+      dermoscopePhotos: dermoscopePhotoUrls, // now array
+      status: "pending",
+      paymentStatus: "completed",
+      amountPaid: 0,
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Patient created successfully.",
+      data: newPatient,
+    });
+  } catch (error) {
+    console.error("Error creating patient:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error creating patient.",
+      error: error.message,
+    });
+  }
 };
 
 exports.getAllPatients = async (req, res) => {
@@ -128,15 +153,20 @@ exports.getDonePatients = async (req, res) => {
 
 
 exports.getPatientDetails = async (req, res) => {
+
+console.log("Report api called");
+
     try {
-        const doctorId = req.userId; // Extract doctor ID from token
+        const doctorId = req.doctorId; // Extract doctor ID from token
         const { patientId } = req.params; // Get patient ID from URL params
+        console.log("Patient id : ", patientId);
+        console.log("Doctor id : ", doctorId);
 
         // ✅ Convert patientId to ObjectId
         const objectIdPatientId = new mongoose.Types.ObjectId(patientId);
 
         // ✅ Fetch patient details
-        const patient = await Patient.findOne({ _id: objectIdPatientId, doctor: doctorId });
+        const patient = await Patient.findOne({ _id: objectIdPatientId});
 
         if (!patient) {
             return res.status(404).json({

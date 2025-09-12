@@ -109,20 +109,27 @@ exports.getPatientDetailsAdmin = async (req, res) => {
 };
 
 exports.generateReport = async (req, res) => {
+
+    console.log("Generate Report api called");
+
     try {
         const { patientId } = req.params;
-        const { dermoscopeFindings, clinicalImpression, digitalSignature } = req.body;
-        const { editedNakedEyePhoto, editedDermoscopePhoto } = req.files;
-
+        console.log("Patient ID: ", patientId);
+        const { dermoscopeFindings, clinicalImpression } = req.body;
+        console.log(dermoscopeFindings, clinicalImpression)
+        
         console.log("Received Files:", req.files);
 
-        if (!patientId || !dermoscopeFindings || !clinicalImpression || !digitalSignature) {
+        if (!patientId || !dermoscopeFindings || !clinicalImpression) {
             return res.status(400).json({ success: false, message: "Please fill all details to generate the report" });
         }
 
-        if (!req.files || !req.files.editedNakedEyePhoto || !req.files.editedDermoscopePhoto) {
+        if (!req.files || !req.files.editedNakedEyePhoto || !req.files.editedDermoscopePhotos) {
             return res.status(400).json({ success: false, message: "Missing required image files." });
         }
+
+        const { editedNakedEyePhoto, editedDermoscopePhotos } = req.files;
+        console.log("Extracted files:", { editedNakedEyePhoto, editedDermoscopePhotos });
 
         const objectIdPatientId = new mongoose.Types.ObjectId(patientId);
 
@@ -135,8 +142,24 @@ exports.generateReport = async (req, res) => {
             return res.status(400).json({ success: false, message: "Payment not completed." });
         }
 
+        // Upload naked eye photo (single)
         const uploadedNakedEye = await uploadImageToCloudinary(editedNakedEyePhoto, "reports");
-        const uploadedDermoscope = await uploadImageToCloudinary(editedDermoscopePhoto, "reports");
+
+        // Handle dermoscope photos (could be single file or multiple)
+        let dermoscopeFiles = editedDermoscopePhotos;
+        if (!Array.isArray(dermoscopeFiles)) {
+            dermoscopeFiles = [dermoscopeFiles]; // wrap single into array
+        }
+
+        // Upload all dermoscope photos
+        const uploadedDermoscopePhotos = await Promise.all(
+            dermoscopeFiles.map((file) => uploadImageToCloudinary(file, "reports"))
+        );
+
+        // Extract URLs from uploaded images
+        const dermoscopePhotoUrls = uploadedDermoscopePhotos.map((img) => img.secure_url);
+
+        console.log("Uploaded dermoscope URLs:", dermoscopePhotoUrls);
 
         const newReport = new Report({
             doctor: patient.doctor,
@@ -144,8 +167,7 @@ exports.generateReport = async (req, res) => {
             dermoscopeFindings,
             clinicalImpression,
             editedNakedEyePhoto: uploadedNakedEye.secure_url,
-            editedDermoscopePhoto: uploadedDermoscope.secure_url,
-            digitalSignature,
+            editedDermoscopePhotos: dermoscopePhotoUrls, // now array of URLs
             reportStatus: "completed"
         });
 
@@ -161,6 +183,7 @@ exports.generateReport = async (req, res) => {
         });
 
     } catch (error) {
+        console.error("Error generating report:", error);
         res.status(500).json({
             success: false,
             message: "Error generating report.",

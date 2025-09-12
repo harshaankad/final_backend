@@ -11,8 +11,8 @@ const patientSchema = new mongoose.Schema({
   siteOfInfection: String,
   previousTreatment: String,
 
-  nakedEyePhoto: String, 
-  dermoscopePhoto: String,
+  nakedEyePhoto: String, // single photo
+  dermoscopePhotos: [String], // now supports multiple photos
 
   status: { type: String, enum: ["pending", "done"], default: "pending" },
 
@@ -23,6 +23,12 @@ const patientSchema = new mongoose.Schema({
 
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
+});
+
+// Update `updatedAt` automatically before saving
+patientSchema.pre("save", function (next) {
+  this.updatedAt = Date.now();
+  next();
 });
 
 module.exports = mongoose.model("Patient", patientSchema);

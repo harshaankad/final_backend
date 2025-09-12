@@ -7,8 +7,8 @@ const reportSchema = new mongoose.Schema({
   dermoscopeFindings: String,
   clinicalImpression: String,
 
-  editedNakedEyePhoto: String, 
-  editedDermoscopePhoto: String,
+  editedNakedEyePhoto: String, // single edited photo
+  editedDermoscopePhotos: [String], // array of edited dermoscope photo URLs
 
   digitalSignature: String,
 
@@ -16,6 +16,12 @@ const reportSchema = new mongoose.Schema({
 
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
+});
+
+// Update `updatedAt` automatically before saving
+reportSchema.pre("save", function (next) {
+  this.updatedAt = Date.now();
+  next();
 });
 
 module.exports = mongoose.model("Report", reportSchema);

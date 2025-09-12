@@ -7,7 +7,7 @@
 /server/node_modules
 # /server/.env
 #public/
-#.env
+.env
 # testing
 /coverage
 
