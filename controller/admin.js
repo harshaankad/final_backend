@@ -7,10 +7,12 @@ const { uploadImageToCloudinary } = require("../utils/imageuploader");
 const editImage = require("../utils/editimage");
 const fs = require("fs");
 
-// ✅ Get all patients with paymentStatus: "completed"
+// ✅ Get all patients with paymentStatus: "completed" - POPULATED WITH DOCTOR INFO
 exports.getAllCompletedPayments = async (req, res) => {
     try {
-        const patients = await Patient.find({ paymentStatus: "completed" });
+        const patients = await Patient.find({ paymentStatus: "completed" })
+            .populate('doctor', 'firstname lastname email') // ✅ ADDED: Populate doctor details
+            .sort({ createdAt: -1 }); // ✅ ADDED: Sort by most recent first
 
         res.status(200).json({
             success: true,
@@ -26,10 +28,12 @@ exports.getAllCompletedPayments = async (req, res) => {
     }
 };
 
-// ✅ Get patients with paymentStatus: "completed" and status: "pending"
+// ✅ Get patients with paymentStatus: "completed" and status: "pending" - POPULATED WITH DOCTOR INFO
 exports.getCompletedPaymentsPendingStatus = async (req, res) => {
     try {
-        const patients = await Patient.find({ paymentStatus: "completed", status: "pending" });
+        const patients = await Patient.find({ paymentStatus: "completed", status: "pending" })
+            .populate('doctor', 'firstname lastname email') // ✅ ADDED: Populate doctor details
+            .sort({ createdAt: -1 }); // ✅ ADDED: Sort by most recent first
 
         res.status(200).json({
             success: true,
@@ -45,10 +49,12 @@ exports.getCompletedPaymentsPendingStatus = async (req, res) => {
     }
 };
 
-// ✅ Get patients with paymentStatus: "completed" and status: "done"
+// ✅ Get patients with paymentStatus: "completed" and status: "done" - POPULATED WITH DOCTOR INFO
 exports.getCompletedPaymentsDoneStatus = async (req, res) => {
     try {
-        const patients = await Patient.find({ paymentStatus: "completed", status: "done" });
+        const patients = await Patient.find({ paymentStatus: "completed", status: "done" })
+            .populate('doctor', 'firstname lastname email') // ✅ ADDED: Populate doctor details
+            .sort({ createdAt: -1 }); // ✅ ADDED: Sort by most recent first
 
         res.status(200).json({
             success: true,
@@ -65,7 +71,7 @@ exports.getCompletedPaymentsDoneStatus = async (req, res) => {
 };
 
 
-// ✅ Admin - Get Patient Details by patientId
+// ✅ Admin - Get Patient Details by patientId - POPULATED WITH DOCTOR INFO
 exports.getPatientDetailsAdmin = async (req, res) => {
     try {
         const { patientId } = req.params;
@@ -79,7 +85,8 @@ exports.getPatientDetailsAdmin = async (req, res) => {
 
         const objectIdPatientId = new mongoose.Types.ObjectId(patientId);
 
-        const patient = await Patient.findOne({ _id: objectIdPatientId });
+        const patient = await Patient.findOne({ _id: objectIdPatientId })
+            .populate('doctor', 'firstname lastname email'); // ✅ ADDED: Populate doctor details
 
         if (!patient) {
             return res.status(404).json({
