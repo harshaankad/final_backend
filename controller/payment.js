@@ -4,15 +4,14 @@ const Patient = require("../models/patient");
 const Doctor = require("../models/doctor");
 
 const razorpay = new Razorpay({
-    key_id: process.env.RAZORPAY_KEY_ID,
-    key_secret: process.env.RAZORPAY_KEY_SECRET
+    key_id: process.env.RAZORPAY_KEY_ID?.trim(),
+    key_secret: process.env.RAZORPAY_KEY_SECRET?.trim()
 });
 
 // ✅ 1️⃣ Create Payment Order
 exports.createPayment = async (req, res) => {
     try {
-        console.log("Create Payment route hit");
-        const {patientId, amount } = req.body; // Amount in INR (Paise format: ₹10 = 1000)
+        const {patientId, amount } = req.body;
 
         const patient = await Patient.findById(patientId);
         //const doctor =  await Doctor.findById(doctorId);
@@ -56,8 +55,6 @@ exports.verifyPayment = async (req, res) => {
             .update(razorpay_order_id + "|" + razorpay_payment_id)
             .digest("hex");
 
-        console.log("Hashed Response : ",generated_signature);
-
         if (generated_signature !== razorpay_signature) {
             return res.status(400).json({ success: false, message: "Invalid payment signature." });
         }
@@ -65,7 +62,6 @@ exports.verifyPayment = async (req, res) => {
         // ✅ Update Patient Payment Status
         await Patient.findByIdAndUpdate(patientId, {
             paymentStatus: "completed",
-            amountPaid: 10,
             paymentId: razorpay_payment_id,
             amountPaid: req.body.amount,
             paymentDate: new Date()

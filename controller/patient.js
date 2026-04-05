@@ -67,7 +67,7 @@ exports.createPatient = async (req, res) => {
       nakedEyePhoto: nakedEyeUpload.secure_url,
       dermoscopePhotos: dermoscopePhotoUrls, // now array
       status: "pending",
-      paymentStatus: "completed",
+      paymentStatus: "pending",
       amountPaid: 0,
     });
 
@@ -114,7 +114,7 @@ exports.getPendingPatients = async (req, res) => {
     try {
         const doctorId = req.doctorId; // Extract doctor ID from token
 
-        const pendingPatients = await Patient.find({ doctor: doctorId, status: "pending" });
+        const pendingPatients = await Patient.find({ doctor: doctorId, status: "pending", paymentStatus: "completed" });
 
         res.status(200).json({
             success: true,
@@ -134,7 +134,7 @@ exports.getDonePatients = async (req, res) => {
     try {
         const doctorId = req.doctorId; // Extract doctor ID from token
 
-        const donePatients = await Patient.find({ doctor: doctorId, status: "done" });
+        const donePatients = await Patient.find({ doctor: doctorId, status: "done", paymentStatus: "completed" });
 
         res.status(200).json({
             success: true,
