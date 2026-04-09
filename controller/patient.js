@@ -13,8 +13,8 @@ exports.createPatient = async (req, res) => {
     console.log("Doctor ID:", doctorId);
 
     // Extract patient details
-    const { firstname, lastname, age, gender, duration, siteOfInfection, previousTreatment } = req.body;
-    console.log("Basic Details:", firstname, lastname, age, gender, duration, siteOfInfection, previousTreatment);
+    const { firstname, lastname, age, gender, duration, siteOfInfection, previousTreatment, clinicalImpression } = req.body;
+    console.log("Basic Details:", firstname, lastname, age, gender, duration, siteOfInfection, previousTreatment, clinicalImpression);
 
     console.log("Uploaded Files:", req.files);
 
@@ -64,6 +64,7 @@ exports.createPatient = async (req, res) => {
       duration,
       siteOfInfection,
       previousTreatment,
+      clinicalImpression,
       nakedEyePhoto: nakedEyeUpload.secure_url,
       dermoscopePhotos: dermoscopePhotoUrls, // now array
       status: "pending",

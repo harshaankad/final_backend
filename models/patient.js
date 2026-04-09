@@ -10,6 +10,7 @@ const patientSchema = new mongoose.Schema({
   duration: String,
   siteOfInfection: String,
   previousTreatment: String,
+  clinicalImpression: String,
 
   nakedEyePhoto: String, // single photo
   dermoscopePhotos: [String], // now supports multiple photos
