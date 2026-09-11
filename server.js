@@ -39,7 +39,24 @@ app.use(cors({
 app.use(express.urlencoded({ extended: true }));
 
 // For file uploads
-app.use(fileUpload({ useTempFiles: true, tempFileDir: "/tmp/" }));
+// Per-file size cap so an oversized request fails fast with a clear message
+// instead of exhausting server memory. Cloudinary's free-plan cap is 10 MB;
+// anything between 10 and 20 MB gets compressed by imageuploader.js first.
+const MAX_UPLOAD_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
+
+app.use(fileUpload({
+  useTempFiles: true,
+  tempFileDir: "/tmp/",
+  limits: { fileSize: MAX_UPLOAD_FILE_SIZE },
+  abortOnLimit: true,
+  limitHandler: (req, res) => {
+    if (res.headersSent) return;
+    res.status(413).json({
+      success: false,
+      message: "One of the images is larger than 20 MB. Please use a smaller image and try again.",
+    });
+  },
+}));
 
 // Connect MongoDB
 connectDB();
