@@ -3,7 +3,7 @@ const { sendOtpEmail, sendAccountExistsEmail } = require("../utils/mailsender");
 const Doctor = require("../models/doctor");
 const bcrypt = require("bcryptjs");
 const { randomNumericCode, safeEqual } = require("../utils/crypto");
-const { signSessionToken, signMfaToken, signMfaSetupToken, publicDoctor } = require("../utils/tokens");
+const { signSessionToken, signMfaToken, publicDoctor } = require("../utils/tokens");
 const { isStr, isEmail, normalizeEmail, isPassword, passwordRule } = require("../utils/validate");
 
 const BCRYPT_ROUNDS = 12;
@@ -109,9 +109,9 @@ exports.verifyOtp = async (req, res) => {
   }
 };
 
-// ✅ Login — step 1 of 2. Verifies the password and hands back an MFA-stage
-// token. A session token is only issued by /auth/mfa/verify (or /auth/mfa/confirm
-// on first enrolment), so every session is password + authenticator.
+// ✅ Login. With MFA off the password alone yields a session (and the client
+// is asked to nudge the doctor to enable it). With MFA on, only a short-lived
+// MFA-stage token is returned and /auth/mfa/verify issues the session.
 exports.login = async (req, res) => {
   try {
     const { email: rawEmail, password } = req.body;
@@ -150,9 +150,10 @@ exports.login = async (req, res) => {
     if (!doctor.mfaEnabled) {
       return res.status(200).json({
         success: true,
-        mfaSetupRequired: true,
-        mfaToken: signMfaSetupToken(doctor),
-        message: "Set up your authenticator app to finish signing in.",
+        token: signSessionToken(doctor),
+        doctor: publicDoctor(doctor),
+        mfaPrompt: true, // client shows the "enable two-step verification" prompt
+        message: "User Login Success",
       });
     }
 

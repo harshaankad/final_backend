@@ -20,10 +20,10 @@ const normalizeBackupCode = (code) => {
 
 const currentStep = () => Math.floor(Date.now() / 1000 / TOTP_PERIOD);
 
-// Start (or restart) enrolment. Accepts the mfa_setup token from login, or a
-// full session token when an already-enrolled doctor wants a new device.
-// The new secret is stored as *pending* and only becomes live once the doctor
-// proves the app works by submitting a valid code to /confirm.
+// Start (or restart) enrolment for a logged-in doctor — first-time, or an
+// already-enrolled doctor moving to a new device. The new secret is stored as
+// *pending* and only becomes live once the doctor proves the app works by
+// submitting a valid code to /confirm.
 exports.setup = async (req, res) => {
   try {
     const secret = generateSecret();
@@ -67,7 +67,8 @@ exports.confirm = async (req, res) => {
     doctor.mfaLastUsedStep = result.timeStep;
     doctor.mfaBackupCodes = backupCodes.map(sha256);
     doctor.mfaFailedAttempts = 0;
-    // Re-enrolling on a new device signs out every other device.
+    // Enabling/re-enrolling signs out every other device; the response
+    // carries a fresh token for this one.
     doctor.tokenVersion = (doctor.tokenVersion || 0) + 1;
     await doctor.save();
 

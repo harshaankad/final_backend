@@ -1,14 +1,12 @@
 const jwt = require("jsonwebtoken");
 
 // Token stages:
-//   session    — fully authenticated (password + MFA). The only stage the
-//                `auth` middleware accepts.
-//   mfa        — password verified, awaiting TOTP/backup code.
-//   mfa_setup  — password verified, but the account has no MFA yet and must
-//                enrol before getting a session.
+//   session — fully authenticated. The only stage the `auth` middleware
+//             accepts. Issued straight after the password when the account
+//             has MFA off, or after a valid code when it is on.
+//   mfa     — password verified, awaiting TOTP/backup code.
 const SESSION_TTL = "12h";
 const MFA_TTL = "5m";
-const MFA_SETUP_TTL = "15m";
 
 const sign = (payload, expiresIn) => jwt.sign(payload, process.env.JWT_SECRET, { expiresIn });
 
@@ -16,8 +14,6 @@ exports.signSessionToken = (doctor) =>
   sign({ doctorId: doctor._id, role: doctor.role, tv: doctor.tokenVersion || 0, stage: "session" }, SESSION_TTL);
 
 exports.signMfaToken = (doctor) => sign({ doctorId: doctor._id, stage: "mfa" }, MFA_TTL);
-
-exports.signMfaSetupToken = (doctor) => sign({ doctorId: doctor._id, stage: "mfa_setup" }, MFA_SETUP_TTL);
 
 exports.verifyToken = (token) => jwt.verify(token, process.env.JWT_SECRET);
 

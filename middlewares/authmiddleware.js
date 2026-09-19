@@ -34,25 +34,21 @@ exports.auth = async (req, res, next) => {
   }
 };
 
-// Password verified, MFA not yet. Used only by the MFA endpoints.
-// `stages` restricts which intermediate tokens a route accepts.
-exports.mfaStageAuth = (stages) => async (req, res, next) => {
+// Password verified, MFA code not yet. Used only by /auth/mfa/verify.
+exports.mfaPendingAuth = async (req, res, next) => {
   try {
     const token = extractToken(req);
     if (!token) return unauthorized(res, "Unauthorized. No token provided.");
 
     const decoded = verifyToken(token);
-    if (!stages.includes(decoded.stage)) return unauthorized(res);
+    if (decoded.stage !== "mfa") return unauthorized(res);
 
     const doctor = await Doctor.findById(decoded.doctorId).select("role tokenVersion mfaEnabled email firstname lastname");
     if (!doctor) return unauthorized(res);
-    // A session token must still match the current tokenVersion.
-    if (decoded.stage === "session" && (doctor.tokenVersion || 0) !== (decoded.tv || 0)) return unauthorized(res);
 
     req.doctor = doctor;
     req.doctorId = doctor._id;
     req.role = doctor.role;
-    req.tokenStage = decoded.stage;
     next();
   } catch (error) {
     return unauthorized(res);
