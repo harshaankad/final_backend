@@ -1,6 +1,11 @@
 require("dotenv").config();
+const { assertEnv } = require("./utils/env");
+assertEnv(); // exit before anything else if secrets are missing/weak
+
 const express = require("express");
 const cors = require("cors");
+const helmet = require("helmet");
+const mongoSanitize = require("express-mongo-sanitize");
 const connectDB = require("./config/db");
 const authroutes = require("./routes/authroutes");
 const patientroute = require("./routes/patientroute");
@@ -10,12 +15,16 @@ const qualificationPicroute = require("./routes/qualificationPicroute");
 const cookieParser = require("cookie-parser");
 const fileUpload = require("express-fileupload");
 const cloudinary = require("cloudinary").v2;
+const { globalLimiter } = require("./middlewares/rateLimiters");
+const cleanupTempFiles = require("./middlewares/cleanupTempFiles");
 
 const app = express();
 
-// Middleware
-app.use(express.json());
-app.use(cookieParser());
+// Behind Render's proxy: needed so req.ip (rate limiting) is the client, not the proxy.
+app.set("trust proxy", 1);
+app.disable("x-powered-by");
+
+app.use(helmet());
 
 // CORS configuration
 const allowedOrigins = [
@@ -35,8 +44,16 @@ app.use(cors({
   credentials: true,
 }));
 
-// For URL-encoded data
-app.use(express.urlencoded({ extended: true }));
+app.use(globalLimiter);
+
+// Body parsing — small limits; images come through multipart, not JSON.
+app.use(express.json({ limit: "100kb" }));
+app.use(express.urlencoded({ extended: true, limit: "100kb" }));
+app.use(cookieParser());
+
+// Strip `$` and `.` from keys in body/query/params so operators like
+// {"$gt": ""} can never reach a Mongo query.
+app.use(mongoSanitize());
 
 // For file uploads
 // Per-file size cap so an oversized request fails fast with a clear message
@@ -47,7 +64,7 @@ const MAX_UPLOAD_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
 app.use(fileUpload({
   useTempFiles: true,
   tempFileDir: "/tmp/",
-  limits: { fileSize: MAX_UPLOAD_FILE_SIZE },
+  limits: { fileSize: MAX_UPLOAD_FILE_SIZE, files: 12 },
   abortOnLimit: true,
   limitHandler: (req, res) => {
     if (res.headersSent) return;
@@ -57,6 +74,7 @@ app.use(fileUpload({
     });
   },
 }));
+app.use(cleanupTempFiles);
 
 // Connect MongoDB
 connectDB();
@@ -78,6 +96,19 @@ app.use("/api", qualificationPicroute);
 // Default Route
 app.get("/", (req, res) => {
   res.send("API is running...");
+});
+
+// Central error handler: never echo internals to the client.
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  if (err.message === "Not allowed by CORS") {
+    return res.status(403).json({ success: false, message: "Origin not allowed." });
+  }
+  if (err.type === "entity.too.large") {
+    return res.status(413).json({ success: false, message: "Request body too large." });
+  }
+  console.error("Unhandled error:", err.message);
+  res.status(500).json({ success: false, message: "Something went wrong." });
 });
 
 const PORT = process.env.PORT || 5000;

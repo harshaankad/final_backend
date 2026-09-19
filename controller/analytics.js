@@ -251,7 +251,7 @@ exports.getAnalytics = async (req, res) => {
       recent,
     });
   } catch (error) {
-    console.error("Error computing analytics:", error);
-    res.status(500).json({ success: false, message: "Error computing analytics.", error: error.message });
+    console.error("Error computing analytics:", error.message);
+    res.status(500).json({ success: false, message: "Error computing analytics." });
   }
 };

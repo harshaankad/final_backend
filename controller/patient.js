@@ -2,31 +2,22 @@ const Patient = require("../models/patient");
 const { uploadImageToCloudinary } = require("../utils/imageuploader");
 const Report = require("../models/report");
 const mongoose = require("mongoose");
+const { isStr } = require("../utils/validate");
 
+const MAX_DERMOSCOPE_PHOTOS = 10;
 
 exports.createPatient = async (req, res) => {
   try {
-    console.log("Create Patient API hit");
-
-    // Extract doctor ID (set from auth middleware)
     const doctorId = req.doctorId;
-    console.log("Doctor ID:", doctorId);
-
-    // Extract patient details
     const { firstname, lastname, age, gender, duration, siteOfInfection, previousTreatment, clinicalImpression } = req.body;
-    console.log("Basic Details:", firstname, lastname, age, gender, duration, siteOfInfection, previousTreatment, clinicalImpression);
 
-    console.log("Uploaded Files:", req.files);
-
-    // Validate required fields
     if (
-      !firstname ||
-      !lastname ||
-      !gender ||
-      !age ||
-      !duration ||
-      !siteOfInfection ||
-      !previousTreatment ||
+      !isStr(firstname, 100) ||
+      !isStr(lastname, 100) ||
+      !isStr(gender, 10) ||
+      !isStr(duration, 200) ||
+      !isStr(siteOfInfection, 500) ||
+      !isStr(previousTreatment, 2000) ||
       !req.files ||
       !req.files.nakedEyePhoto ||
       !req.files.dermoscopePhotos
@@ -36,37 +27,40 @@ exports.createPatient = async (req, res) => {
         message: "All fields and images are required.",
       });
     }
+    if (clinicalImpression !== undefined && clinicalImpression !== "" && !isStr(clinicalImpression, 2000)) {
+      return res.status(400).json({ success: false, message: "Clinical impression is too long." });
+    }
+    const ageNum = Number(age);
+    if (!Number.isInteger(ageNum) || ageNum < 0 || ageNum > 120) {
+      return res.status(400).json({ success: false, message: "Please enter a valid age." });
+    }
 
-    // ✅ Upload naked eye photo (single file)
-    const nakedEyeUpload = await uploadImageToCloudinary(req.files.nakedEyePhoto, "patients");
-
-    // ✅ Handle dermoscope photos (could be single file or multiple)
     let dermoscopeFiles = req.files.dermoscopePhotos;
     if (!Array.isArray(dermoscopeFiles)) {
       dermoscopeFiles = [dermoscopeFiles]; // wrap single into array
     }
+    if (Array.isArray(req.files.nakedEyePhoto) || dermoscopeFiles.length > MAX_DERMOSCOPE_PHOTOS) {
+      return res.status(400).json({ success: false, message: `Upload one clinical photo and up to ${MAX_DERMOSCOPE_PHOTOS} dermoscope photos.` });
+    }
 
-    // Upload all dermoscope photos
+    const nakedEyeUpload = await uploadImageToCloudinary(req.files.nakedEyePhoto, "patients");
     const dermoscopeUploads = await Promise.all(
       dermoscopeFiles.map((file) => uploadImageToCloudinary(file, "patients"))
     );
-
-    // Extract URLs
     const dermoscopePhotoUrls = dermoscopeUploads.map((img) => img.secure_url);
 
-    // ✅ Create new patient
     const newPatient = await Patient.create({
       doctor: doctorId,
-      firstname,
-      lastname,
-      age,
+      firstname: firstname.trim(),
+      lastname: lastname.trim(),
+      age: ageNum,
       gender,
       duration,
       siteOfInfection,
       previousTreatment,
       clinicalImpression,
       nakedEyePhoto: nakedEyeUpload.secure_url,
-      dermoscopePhotos: dermoscopePhotoUrls, // now array
+      dermoscopePhotos: dermoscopePhotoUrls,
       status: "pending",
       paymentStatus: "pending",
       amountPaid: 0,
@@ -78,23 +72,17 @@ exports.createPatient = async (req, res) => {
       data: newPatient,
     });
   } catch (error) {
-    console.error("Error creating patient:", error);
+    console.error("Error creating patient:", error.message);
     res.status(500).json({
       success: false,
       message: "Error creating patient.",
-      error: error.message,
     });
   }
 };
 
 exports.getAllPatients = async (req, res) => {
     try {
-        const doctorId = req.doctorId; // Extract doctor ID from token
-        console.log("Doctor ID : ",doctorId)
-
-        console.log("All patients api hit")
-
-        const patients = await Patient.find({ doctor: doctorId , paymentStatus: "completed" });
+        const patients = await Patient.find({ doctor: req.doctorId, paymentStatus: "completed" });
 
         res.status(200).json({
             success: true,
@@ -102,10 +90,10 @@ exports.getAllPatients = async (req, res) => {
             data: patients
         });
     } catch (error) {
+        console.error("getAllPatients error:", error.message);
         res.status(500).json({
             success: false,
             message: "Error fetching patients.",
-            error: error.message
         });
     }
 };
@@ -113,9 +101,7 @@ exports.getAllPatients = async (req, res) => {
 
 exports.getPendingPatients = async (req, res) => {
     try {
-        const doctorId = req.doctorId; // Extract doctor ID from token
-
-        const pendingPatients = await Patient.find({ doctor: doctorId, status: "pending", paymentStatus: "completed" });
+        const pendingPatients = await Patient.find({ doctor: req.doctorId, status: "pending", paymentStatus: "completed" });
 
         res.status(200).json({
             success: true,
@@ -123,19 +109,18 @@ exports.getPendingPatients = async (req, res) => {
             data: pendingPatients
         });
     } catch (error) {
+        console.error("getPendingPatients error:", error.message);
         res.status(500).json({
             success: false,
             message: "Error fetching pending patients.",
-            error: error.message
         });
     }
 };
 
+
 exports.getDonePatients = async (req, res) => {
     try {
-        const doctorId = req.doctorId; // Extract doctor ID from token
-
-        const donePatients = await Patient.find({ doctor: doctorId, status: "done", paymentStatus: "completed" });
+        const donePatients = await Patient.find({ doctor: req.doctorId, status: "done", paymentStatus: "completed" });
 
         res.status(200).json({
             success: true,
@@ -143,31 +128,28 @@ exports.getDonePatients = async (req, res) => {
             data: donePatients
         });
     } catch (error) {
+        console.error("getDonePatients error:", error.message);
         res.status(500).json({
             success: false,
             message: "Error fetching done patients.",
-            error: error.message
         });
     }
 };
 
 
-
+// Used by both the doctor's report page and the admin's generate-report page.
+// Doctors only ever see their own patients; admins see any.
 exports.getPatientDetails = async (req, res) => {
-
-console.log("Report api called");
-
     try {
-        const doctorId = req.doctorId; // Extract doctor ID from token
-        const { patientId } = req.params; // Get patient ID from URL params
-        console.log("Patient id : ", patientId);
-        console.log("Doctor id : ", doctorId);
+        const { patientId } = req.params;
+        if (!mongoose.isValidObjectId(patientId)) {
+            return res.status(400).json({ success: false, message: "Invalid patient id." });
+        }
 
-        // ✅ Convert patientId to ObjectId
-        const objectIdPatientId = new mongoose.Types.ObjectId(patientId);
+        const filter = { _id: patientId };
+        if (req.role !== "admin") filter.doctor = req.doctorId;
 
-        // ✅ Fetch patient details
-        const patient = await Patient.findOne({ _id: objectIdPatientId});
+        const patient = await Patient.findOne(filter);
 
         if (!patient) {
             return res.status(404).json({
@@ -176,10 +158,9 @@ console.log("Report api called");
             });
         }
 
-        // ✅ If status is "done", fetch the corresponding report
         let report = null;
         if (patient.status === "done") {
-            report = await Report.findOne({ patient: objectIdPatientId });
+            report = await Report.findOne({ patient: patient._id });
         }
 
         return res.status(200).json({
@@ -189,15 +170,10 @@ console.log("Report api called");
         });
 
     } catch (error) {
+        console.error("getPatientDetails error:", error.message);
         res.status(500).json({
             success: false,
             message: "Error fetching patient details.",
-            error: error.message,
         });
     }
 };
-
-
-
-
-

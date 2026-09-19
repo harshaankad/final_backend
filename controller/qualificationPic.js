@@ -3,36 +3,23 @@ const Doctor = require("../models/doctor");
 
 exports.uploadQualificationPic = async (req, res) => {
     try {
-        const doctorId = req.userId; // Get doctor ID from auth token
-
-        // ✅ Check if file is uploaded
-        if (!req.files || !req.files.qualificationPic) {
+        if (!req.files || !req.files.qualificationPic || Array.isArray(req.files.qualificationPic)) {
             return res.status(400).json({
                 success: false,
                 message: "Qualification picture is required.",
             });
         }
 
-        const qualificationPic = req.files.qualificationPic;
+        const uploadedImage = await uploadImageToCloudinary(req.files.qualificationPic, "qualification_pics");
 
-        // 🔥 Debugging: Log file details
-        console.log("Uploaded File Details:", qualificationPic);
-
-        // ✅ Upload to Cloudinary
-        const uploadedImage = await uploadImageToCloudinary(qualificationPic, "qualification_pics");
-
-        // ✅ Update Doctor's profile with the uploaded image URL
         const updatedDoctor = await Doctor.findByIdAndUpdate(
-            doctorId,
+            req.doctorId,
             { qualificationPic: uploadedImage.secure_url },
             { new: true }
-        );
+        ).select("firstname lastname email role qualificationPic");
 
         if (!updatedDoctor) {
-            return res.status(404).json({
-                success: false,
-                message: "Doctor not found.",
-            });
+            return res.status(404).json({ success: false, message: "Doctor not found." });
         }
 
         return res.status(200).json({
@@ -40,13 +27,11 @@ exports.uploadQualificationPic = async (req, res) => {
             message: "Qualification picture uploaded successfully.",
             data: updatedDoctor,
         });
-
     } catch (error) {
-        console.error("Upload Error:", error);
+        console.error("Upload Error:", error.message);
         res.status(500).json({
             success: false,
             message: "Error uploading qualification picture.",
-            error: error.message,
         });
     }
 };

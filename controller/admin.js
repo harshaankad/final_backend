@@ -1,11 +1,11 @@
 const Patient = require("../models/patient");
 const mongoose = require("mongoose");
 const Report = require("../models/report");
-const Doctor = require("../models/doctor"); // ✅ Make sure this is your User model
-const jwt = require("jsonwebtoken");
+const Doctor = require("../models/doctor");
 const { uploadImageToCloudinary } = require("../utils/imageuploader");
-const editImage = require("../utils/editimage");
-const fs = require("fs");
+const { isStr } = require("../utils/validate");
+
+const MAX_DERMOSCOPE_PHOTOS = 10;
 
 // ✅ Get all patients with paymentStatus: "completed" - POPULATED WITH DOCTOR INFO
 exports.getAllCompletedPayments = async (req, res) => {
@@ -22,8 +22,7 @@ exports.getAllCompletedPayments = async (req, res) => {
     } catch (error) {
         res.status(500).json({
             success: false,
-            message: "Error fetching patients with completed payments.",
-            error: error.message
+            message: "Error fetching patients with completed payments."
         });
     }
 };
@@ -43,8 +42,7 @@ exports.getCompletedPaymentsPendingStatus = async (req, res) => {
     } catch (error) {
         res.status(500).json({
             success: false,
-            message: "Error fetching patients with completed payments and pending status.",
-            error: error.message
+            message: "Error fetching patients with completed payments and pending status."
         });
     }
 };
@@ -64,8 +62,7 @@ exports.getCompletedPaymentsDoneStatus = async (req, res) => {
     } catch (error) {
         res.status(500).json({
             success: false,
-            message: "Error fetching patients with completed payments and done status.",
-            error: error.message
+            message: "Error fetching patients with completed payments and done status."
         });
     }
 };
@@ -76,16 +73,11 @@ exports.getPatientDetailsAdmin = async (req, res) => {
     try {
         const { patientId } = req.params;
 
-        if (!patientId) {
-            return res.status(404).json({
-                success: false,
-                message: "PatientId not passed as parameter.",
-            });
+        if (!mongoose.isValidObjectId(patientId)) {
+            return res.status(400).json({ success: false, message: "Invalid patient id." });
         }
 
-        const objectIdPatientId = new mongoose.Types.ObjectId(patientId);
-
-        const patient = await Patient.findOne({ _id: objectIdPatientId })
+        const patient = await Patient.findOne({ _id: patientId })
             .populate('doctor', 'firstname lastname email'); // ✅ ADDED: Populate doctor details
 
         if (!patient) {
@@ -97,7 +89,7 @@ exports.getPatientDetailsAdmin = async (req, res) => {
 
         let report = null;
         if (patient.status === "done") {
-            report = await Report.findOne({ patient: objectIdPatientId });
+            report = await Report.findOne({ patient: patient._id });
         }
 
         return res.status(200).json({
@@ -110,24 +102,20 @@ exports.getPatientDetailsAdmin = async (req, res) => {
         res.status(500).json({
             success: false,
             message: "Error fetching patient details.",
-            error: error.message,
         });
     }
 };
 
 exports.generateReport = async (req, res) => {
 
-    console.log("Generate Report api called");
-
     try {
         const { patientId } = req.params;
-        console.log("Patient ID: ", patientId);
         const { dermoscopeFindings, clinicalImpression } = req.body;
-        console.log(dermoscopeFindings, clinicalImpression)
-        
-        console.log("Received Files:", req.files);
 
-        if (!patientId || !dermoscopeFindings || !clinicalImpression) {
+        if (!mongoose.isValidObjectId(patientId)) {
+            return res.status(400).json({ success: false, message: "Invalid patient id." });
+        }
+        if (!isStr(dermoscopeFindings, 5000) || !isStr(clinicalImpression, 5000)) {
             return res.status(400).json({ success: false, message: "Please fill all details to generate the report" });
         }
 
@@ -136,11 +124,8 @@ exports.generateReport = async (req, res) => {
         }
 
         const { editedNakedEyePhoto, editedDermoscopePhotos } = req.files;
-        console.log("Extracted files:", { editedNakedEyePhoto, editedDermoscopePhotos });
 
-        const objectIdPatientId = new mongoose.Types.ObjectId(patientId);
-
-        const patient = await Patient.findById(objectIdPatientId);
+        const patient = await Patient.findById(patientId);
         if (!patient) {
             return res.status(404).json({ success: false, message: "Patient not found." });
         }
@@ -157,6 +142,9 @@ exports.generateReport = async (req, res) => {
         if (!Array.isArray(dermoscopeFiles)) {
             dermoscopeFiles = [dermoscopeFiles]; // wrap single into array
         }
+        if (Array.isArray(editedNakedEyePhoto) || dermoscopeFiles.length > MAX_DERMOSCOPE_PHOTOS) {
+            return res.status(400).json({ success: false, message: `Upload one clinical photo and up to ${MAX_DERMOSCOPE_PHOTOS} dermoscope photos.` });
+        }
 
         // Upload all dermoscope photos
         const uploadedDermoscopePhotos = await Promise.all(
@@ -166,11 +154,9 @@ exports.generateReport = async (req, res) => {
         // Extract URLs from uploaded images
         const dermoscopePhotoUrls = uploadedDermoscopePhotos.map((img) => img.secure_url);
 
-        console.log("Uploaded dermoscope URLs:", dermoscopePhotoUrls);
-
         const newReport = new Report({
             doctor: patient.doctor,
-            patient: objectIdPatientId,
+            patient: patient._id,
             dermoscopeFindings,
             clinicalImpression,
             editedNakedEyePhoto: uploadedNakedEye.secure_url,
@@ -190,11 +176,10 @@ exports.generateReport = async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Error generating report:", error);
+        console.error("Error generating report:", error.message);
         res.status(500).json({
             success: false,
             message: "Error generating report.",
-            error: error.message,
         });
     }
 };
@@ -220,7 +205,6 @@ exports.getAllReports = async (req, res) => {
         res.status(500).json({
             success: false,
             message: "Error fetching reports.",
-            error: error.message,
         });
     }
 };
@@ -229,11 +213,8 @@ exports.getReportById = async (req, res) => {
     try {
         const { reportId } = req.params;
 
-        if (!reportId) {
-            return res.status(404).json({
-                success: false,
-                message: "ReportId not found.",
-            });
+        if (!mongoose.isValidObjectId(reportId)) {
+            return res.status(400).json({ success: false, message: "Invalid report id." });
         }
 
         const report = await Report.findById(reportId).populate("patient doctor", "firstname lastname age gender");
@@ -255,7 +236,6 @@ exports.getReportById = async (req, res) => {
         res.status(500).json({
             success: false,
             message: "Error fetching report.",
-            error: error.message,
         });
     }
 };
@@ -264,16 +244,7 @@ exports.getReportById = async (req, res) => {
 
 exports.getMe = async (req, res) => {
     try {
-      console.log("✅ getMe API hit");
-  
-      if (!req.doctorId) {
-        return res.status(401).json({
-          success: false,
-          message: "Unauthorized: Doctor ID not found in token",
-        });
-      }
-  
-      const user = await Doctor.findById(req.doctorId).select("-password");
+      const user = await Doctor.findById(req.doctorId).select("firstname lastname email role mfaEnabled");
   
       if (!user) {
         return res.status(404).json({
@@ -288,11 +259,10 @@ exports.getMe = async (req, res) => {
         user,
       });
     } catch (error) {
-      console.error("❌ Error in getMe:", error);
+      console.error("getMe error:", error.message);
       return res.status(500).json({
         success: false,
         message: "Server error",
-        error: error.message,
       });
     }
   };

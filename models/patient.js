@@ -19,6 +19,7 @@ const patientSchema = new mongoose.Schema({
 
   paymentStatus: { type: String, enum: ["pending", "completed"], default: "pending" },
   paymentId: String,
+  razorpayOrderId: { type: String, index: true }, // set at order creation; verify-payment resolves the patient by this
   amountPaid: Number,
   paymentDate: Date,
 
