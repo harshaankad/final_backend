@@ -1,8 +1,9 @@
 const Patient = require("../models/patient");
-const { uploadImageToCloudinary } = require("../utils/imageuploader");
+const { uploadImageToCloudinary, ImageValidationError } = require("../utils/imageuploader");
 const Report = require("../models/report");
 const mongoose = require("mongoose");
 const { isStr } = require("../utils/validate");
+const { presentPatient, presentReport, WITHOUT_PATIENT_IMAGES } = require("../utils/imageAccess");
 
 const MAX_DERMOSCOPE_PHOTOS = 10;
 
@@ -43,11 +44,13 @@ exports.createPatient = async (req, res) => {
       return res.status(400).json({ success: false, message: `Upload one clinical photo and up to ${MAX_DERMOSCOPE_PHOTOS} dermoscope photos.` });
     }
 
+    // Each file is sniffed, re-encoded (EXIF stripped) and stored as an
+    // authenticated asset; only the public_id is kept.
     const nakedEyeUpload = await uploadImageToCloudinary(req.files.nakedEyePhoto, "patients");
     const dermoscopeUploads = await Promise.all(
       dermoscopeFiles.map((file) => uploadImageToCloudinary(file, "patients"))
     );
-    const dermoscopePhotoUrls = dermoscopeUploads.map((img) => img.secure_url);
+    const dermoscopePhotoIds = dermoscopeUploads.map((img) => img.publicId);
 
     const newPatient = await Patient.create({
       doctor: doctorId,
@@ -59,8 +62,8 @@ exports.createPatient = async (req, res) => {
       siteOfInfection,
       previousTreatment,
       clinicalImpression,
-      nakedEyePhoto: nakedEyeUpload.secure_url,
-      dermoscopePhotos: dermoscopePhotoUrls,
+      nakedEyePhoto: nakedEyeUpload.publicId,
+      dermoscopePhotos: dermoscopePhotoIds,
       status: "pending",
       paymentStatus: "pending",
       amountPaid: 0,
@@ -69,9 +72,12 @@ exports.createPatient = async (req, res) => {
     res.status(201).json({
       success: true,
       message: "Patient created successfully.",
-      data: newPatient,
+      data: presentPatient(newPatient),
     });
   } catch (error) {
+    if (error instanceof ImageValidationError) {
+      return res.status(400).json({ success: false, message: error.message });
+    }
     console.error("Error creating patient:", error.message);
     res.status(500).json({
       success: false,
@@ -82,7 +88,7 @@ exports.createPatient = async (req, res) => {
 
 exports.getAllPatients = async (req, res) => {
     try {
-        const patients = await Patient.find({ doctor: req.doctorId, paymentStatus: "completed" });
+        const patients = await Patient.find({ doctor: req.doctorId, paymentStatus: "completed" }).select(WITHOUT_PATIENT_IMAGES);
 
         res.status(200).json({
             success: true,
@@ -101,7 +107,7 @@ exports.getAllPatients = async (req, res) => {
 
 exports.getPendingPatients = async (req, res) => {
     try {
-        const pendingPatients = await Patient.find({ doctor: req.doctorId, status: "pending", paymentStatus: "completed" });
+        const pendingPatients = await Patient.find({ doctor: req.doctorId, status: "pending", paymentStatus: "completed" }).select(WITHOUT_PATIENT_IMAGES);
 
         res.status(200).json({
             success: true,
@@ -120,7 +126,7 @@ exports.getPendingPatients = async (req, res) => {
 
 exports.getDonePatients = async (req, res) => {
     try {
-        const donePatients = await Patient.find({ doctor: req.doctorId, status: "done", paymentStatus: "completed" });
+        const donePatients = await Patient.find({ doctor: req.doctorId, status: "done", paymentStatus: "completed" }).select(WITHOUT_PATIENT_IMAGES);
 
         res.status(200).json({
             success: true,
@@ -163,10 +169,11 @@ exports.getPatientDetails = async (req, res) => {
             report = await Report.findOne({ patient: patient._id });
         }
 
+        // Image refs become signed URLs valid for 30 minutes.
         return res.status(200).json({
             success: true,
             message: report ? "Patient details with report fetched successfully." : "Patient details fetched successfully.",
-            data: { patient, report },
+            data: { patient: presentPatient(patient), report: presentReport(report) },
         });
 
     } catch (error) {

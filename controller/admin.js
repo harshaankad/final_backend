@@ -2,8 +2,9 @@ const Patient = require("../models/patient");
 const mongoose = require("mongoose");
 const Report = require("../models/report");
 const Doctor = require("../models/doctor");
-const { uploadImageToCloudinary } = require("../utils/imageuploader");
+const { uploadImageToCloudinary, ImageValidationError } = require("../utils/imageuploader");
 const { isStr } = require("../utils/validate");
+const { presentPatient, presentReport, WITHOUT_PATIENT_IMAGES, WITHOUT_REPORT_IMAGES } = require("../utils/imageAccess");
 
 const MAX_DERMOSCOPE_PHOTOS = 10;
 
@@ -11,6 +12,7 @@ const MAX_DERMOSCOPE_PHOTOS = 10;
 exports.getAllCompletedPayments = async (req, res) => {
     try {
         const patients = await Patient.find({ paymentStatus: "completed" })
+            .select(WITHOUT_PATIENT_IMAGES)
             .populate('doctor', 'firstname lastname email') // ✅ ADDED: Populate doctor details
             .sort({ createdAt: -1 }); // ✅ ADDED: Sort by most recent first
 
@@ -31,6 +33,7 @@ exports.getAllCompletedPayments = async (req, res) => {
 exports.getCompletedPaymentsPendingStatus = async (req, res) => {
     try {
         const patients = await Patient.find({ paymentStatus: "completed", status: "pending" })
+            .select(WITHOUT_PATIENT_IMAGES)
             .populate('doctor', 'firstname lastname email') // ✅ ADDED: Populate doctor details
             .sort({ createdAt: -1 }); // ✅ ADDED: Sort by most recent first
 
@@ -51,6 +54,7 @@ exports.getCompletedPaymentsPendingStatus = async (req, res) => {
 exports.getCompletedPaymentsDoneStatus = async (req, res) => {
     try {
         const patients = await Patient.find({ paymentStatus: "completed", status: "done" })
+            .select(WITHOUT_PATIENT_IMAGES)
             .populate('doctor', 'firstname lastname email') // ✅ ADDED: Populate doctor details
             .sort({ createdAt: -1 }); // ✅ ADDED: Sort by most recent first
 
@@ -95,7 +99,7 @@ exports.getPatientDetailsAdmin = async (req, res) => {
         return res.status(200).json({
             success: true,
             message: report ? "Patient details with report fetched successfully." : "Patient details fetched successfully.",
-            data: { patient, report },
+            data: { patient: presentPatient(patient), report: presentReport(report) },
         });
 
     } catch (error) {
@@ -151,16 +155,13 @@ exports.generateReport = async (req, res) => {
             dermoscopeFiles.map((file) => uploadImageToCloudinary(file, "reports"))
         );
 
-        // Extract URLs from uploaded images
-        const dermoscopePhotoUrls = uploadedDermoscopePhotos.map((img) => img.secure_url);
-
         const newReport = new Report({
             doctor: patient.doctor,
             patient: patient._id,
             dermoscopeFindings,
             clinicalImpression,
-            editedNakedEyePhoto: uploadedNakedEye.secure_url,
-            editedDermoscopePhotos: dermoscopePhotoUrls, // now array of URLs
+            editedNakedEyePhoto: uploadedNakedEye.publicId,
+            editedDermoscopePhotos: uploadedDermoscopePhotos.map((img) => img.publicId),
             reportStatus: "completed"
         });
 
@@ -172,10 +173,13 @@ exports.generateReport = async (req, res) => {
         return res.status(201).json({
             success: true,
             message: "Report generated successfully.",
-            data: newReport,
+            data: presentReport(newReport),
         });
 
     } catch (error) {
+        if (error instanceof ImageValidationError) {
+            return res.status(400).json({ success: false, message: error.message });
+        }
         console.error("Error generating report:", error.message);
         res.status(500).json({
             success: false,
@@ -186,7 +190,7 @@ exports.generateReport = async (req, res) => {
 
 exports.getAllReports = async (req, res) => {
     try {
-        const reports = await Report.find().populate("patient doctor", "firstname lastname age gender");
+        const reports = await Report.find().select(WITHOUT_REPORT_IMAGES).populate("patient doctor", "firstname lastname age gender");
 
         if (!reports || reports.length === 0) {
             return res.status(404).json({
@@ -229,7 +233,7 @@ exports.getReportById = async (req, res) => {
         res.status(200).json({
             success: true,
             message: "Report fetched successfully.",
-            data: report,
+            data: presentReport(report),
         });
 
     } catch (error) {

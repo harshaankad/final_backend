@@ -1,5 +1,6 @@
-const { uploadImageToCloudinary } = require("../utils/imageuploader");
+const { uploadImageToCloudinary, ImageValidationError } = require("../utils/imageuploader");
 const Doctor = require("../models/doctor");
+const { presentDoctor } = require("../utils/imageAccess");
 
 exports.uploadQualificationPic = async (req, res) => {
     try {
@@ -14,7 +15,7 @@ exports.uploadQualificationPic = async (req, res) => {
 
         const updatedDoctor = await Doctor.findByIdAndUpdate(
             req.doctorId,
-            { qualificationPic: uploadedImage.secure_url },
+            { qualificationPic: uploadedImage.publicId },
             { new: true }
         ).select("firstname lastname email role qualificationPic");
 
@@ -25,9 +26,12 @@ exports.uploadQualificationPic = async (req, res) => {
         return res.status(200).json({
             success: true,
             message: "Qualification picture uploaded successfully.",
-            data: updatedDoctor,
+            data: presentDoctor(updatedDoctor),
         });
     } catch (error) {
+        if (error instanceof ImageValidationError) {
+            return res.status(400).json({ success: false, message: error.message });
+        }
         console.error("Upload Error:", error.message);
         res.status(500).json({
             success: false,
