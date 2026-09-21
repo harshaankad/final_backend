@@ -89,7 +89,7 @@ const doctorName = (doc) => {
 
 exports.getAnalytics = async (req, res) => {
   try {
-    const rangeKey = RANGES[req.query.range] ? req.query.range : "30d";
+    const rangeKey = req.query.range || "30d"; // validated by validation/schemas.js#analyticsQuery
     const { days, bucket } = RANGES[rangeKey];
 
     const to = new Date();

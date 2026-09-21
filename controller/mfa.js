@@ -3,7 +3,9 @@ const { generateSecret, generateURI, verify } = require("otplib");
 const Doctor = require("../models/doctor");
 const { encrypt, decrypt, sha256, randomBackupCode } = require("../utils/crypto");
 const { signSessionToken, publicDoctor } = require("../utils/tokens");
-const { isTotpCode, isBackupCode } = require("../utils/validate");
+const { isTotpCode } = require("../utils/validate");
+const { setSessionCookie, clearMfaCookie } = require("../utils/cookies");
+const audit = require("../utils/audit");
 
 const ISSUER = "DermaDrishti";
 const BACKUP_CODE_COUNT = 8;
@@ -44,9 +46,6 @@ exports.setup = async (req, res) => {
 exports.confirm = async (req, res) => {
   try {
     const { code } = req.body;
-    if (!isTotpCode(code)) {
-      return res.status(400).json({ success: false, error: "Enter the 6-digit code from your authenticator app." });
-    }
 
     const doctor = await Doctor.findById(req.doctorId).select("+mfaPendingSecret");
     if (!doctor || !doctor.mfaPendingSecret) {
@@ -54,8 +53,9 @@ exports.confirm = async (req, res) => {
     }
 
     const secret = decrypt(doctor.mfaPendingSecret);
-    const result = await verify({ secret, token: code.trim(), epochTolerance: EPOCH_TOLERANCE });
+    const result = await verify({ secret, token: code, epochTolerance: EPOCH_TOLERANCE });
     if (!result.valid) {
+      audit(req, "mfa.confirm_failed", { outcome: "failure" });
       return res.status(400).json({ success: false, error: "That code didn't match. Check the time on your phone and try again." });
     }
 
@@ -72,9 +72,10 @@ exports.confirm = async (req, res) => {
     doctor.tokenVersion = (doctor.tokenVersion || 0) + 1;
     await doctor.save();
 
+    setSessionCookie(res, signSessionToken(doctor));
+    audit(req, "mfa.enabled");
     res.status(200).json({
       success: true,
-      token: signSessionToken(doctor),
       doctor: publicDoctor(doctor),
       backupCodes,
       message: "Authenticator app enabled.",
@@ -89,9 +90,6 @@ exports.confirm = async (req, res) => {
 exports.verifyLogin = async (req, res) => {
   try {
     const { code } = req.body;
-    if (typeof code !== "string" || !(isTotpCode(code) || isBackupCode(code))) {
-      return res.status(400).json({ success: false, error: "Enter your 6-digit code or a backup code." });
-    }
 
     const doctor = await Doctor.findById(req.doctorId).select(
       "+mfaSecret +mfaBackupCodes +mfaLastUsedStep +mfaFailedAttempts +lockUntil"
@@ -109,7 +107,7 @@ exports.verifyLogin = async (req, res) => {
 
     if (isTotpCode(code)) {
       const secret = decrypt(doctor.mfaSecret);
-      const opts = { secret, token: code.trim(), epochTolerance: EPOCH_TOLERANCE };
+      const opts = { secret, token: code, epochTolerance: EPOCH_TOLERANCE };
       // Reject any step already used (replay). Skip the bound if it would be
       // ahead of "now" (clock was corrected backwards) — otplib throws on that.
       if (Number.isInteger(doctor.mfaLastUsedStep) && doctor.mfaLastUsedStep <= currentStep()) {
@@ -134,6 +132,7 @@ exports.verifyLogin = async (req, res) => {
         ? { mfaFailedAttempts: 0, lockUntil: new Date(Date.now() + LOCK_MINUTES * 60000) }
         : { mfaFailedAttempts: attempts };
       await Doctor.updateOne({ _id: doctor._id }, fail);
+      audit(req, "mfa.verify_failed", { outcome: "failure", meta: { attempts } });
       return res.status(401).json({ success: false, error: "Invalid code." });
     }
 
@@ -142,9 +141,11 @@ exports.verifyLogin = async (req, res) => {
 
     const remainingBackupCodes = update.$pull ? (doctor.mfaBackupCodes.length - 1) : doctor.mfaBackupCodes.length;
 
+    setSessionCookie(res, signSessionToken(doctor));
+    clearMfaCookie(res);
+    audit(req, "login.success", { meta: { mfa: true, backupCode: !!update.$pull, remainingBackupCodes } });
     res.status(200).json({
       success: true,
-      token: signSessionToken(doctor),
       doctor: publicDoctor(doctor),
       remainingBackupCodes,
       message: "User Login Success",

@@ -1,39 +1,22 @@
 const Patient = require("../models/patient");
 const { uploadImageToCloudinary, ImageValidationError } = require("../utils/imageuploader");
 const Report = require("../models/report");
-const mongoose = require("mongoose");
-const { isStr } = require("../utils/validate");
 const { presentPatient, presentReport, WITHOUT_PATIENT_IMAGES } = require("../utils/imageAccess");
+const audit = require("../utils/audit");
 
 const MAX_DERMOSCOPE_PHOTOS = 10;
 
 exports.createPatient = async (req, res) => {
   try {
     const doctorId = req.doctorId;
+    // Text fields already validated by validation/schemas.js#createPatient.
     const { firstname, lastname, age, gender, duration, siteOfInfection, previousTreatment, clinicalImpression } = req.body;
 
-    if (
-      !isStr(firstname, 100) ||
-      !isStr(lastname, 100) ||
-      !isStr(gender, 10) ||
-      !isStr(duration, 200) ||
-      !isStr(siteOfInfection, 500) ||
-      !isStr(previousTreatment, 2000) ||
-      !req.files ||
-      !req.files.nakedEyePhoto ||
-      !req.files.dermoscopePhotos
-    ) {
+    if (!req.files || !req.files.nakedEyePhoto || !req.files.dermoscopePhotos) {
       return res.status(400).json({
         success: false,
         message: "All fields and images are required.",
       });
-    }
-    if (clinicalImpression !== undefined && clinicalImpression !== "" && !isStr(clinicalImpression, 2000)) {
-      return res.status(400).json({ success: false, message: "Clinical impression is too long." });
-    }
-    const ageNum = Number(age);
-    if (!Number.isInteger(ageNum) || ageNum < 0 || ageNum > 120) {
-      return res.status(400).json({ success: false, message: "Please enter a valid age." });
     }
 
     let dermoscopeFiles = req.files.dermoscopePhotos;
@@ -54,9 +37,9 @@ exports.createPatient = async (req, res) => {
 
     const newPatient = await Patient.create({
       doctor: doctorId,
-      firstname: firstname.trim(),
-      lastname: lastname.trim(),
-      age: ageNum,
+      firstname,
+      lastname,
+      age,
       gender,
       duration,
       siteOfInfection,
@@ -69,6 +52,7 @@ exports.createPatient = async (req, res) => {
       amountPaid: 0,
     });
 
+    audit(req, "patient.created", { target: { type: "patient", id: newPatient._id }, meta: { images: 1 + dermoscopePhotoIds.length } });
     res.status(201).json({
       success: true,
       message: "Patient created successfully.",
@@ -148,9 +132,6 @@ exports.getDonePatients = async (req, res) => {
 exports.getPatientDetails = async (req, res) => {
     try {
         const { patientId } = req.params;
-        if (!mongoose.isValidObjectId(patientId)) {
-            return res.status(400).json({ success: false, message: "Invalid patient id." });
-        }
 
         const filter = { _id: patientId };
         if (req.role !== "admin") filter.doctor = req.doctorId;
@@ -169,6 +150,7 @@ exports.getPatientDetails = async (req, res) => {
             report = await Report.findOne({ patient: patient._id });
         }
 
+        audit(req, "patient.viewed", { target: { type: "patient", id: patient._id }, meta: { withReport: !!report } });
         // Image refs become signed URLs valid for 30 minutes.
         return res.status(200).json({
             success: true,

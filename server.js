@@ -17,6 +17,9 @@ const fileUpload = require("express-fileupload");
 const cloudinary = require("cloudinary").v2;
 const { globalLimiter } = require("./middlewares/rateLimiters");
 const cleanupTempFiles = require("./middlewares/cleanupTempFiles");
+const csrfOriginCheck = require("./middlewares/csrf");
+const logger = require("./utils/logger");
+const pinoHttp = require("pino-http");
 
 const app = express();
 
@@ -26,11 +29,25 @@ app.disable("x-powered-by");
 
 app.use(helmet());
 
-// CORS configuration
-const allowedOrigins = [
-  "http://localhost:3000",      // Local testing
-  "https://www.ankad.in"            // Your live frontend
-];
+// One structured line per request (method, path, status, ms, doctor).
+// Bodies are never logged; auth headers/cookies are redacted by the logger.
+app.use(pinoHttp({
+  logger,
+  autoLogging: { ignore: (req) => req.url === "/" },
+  customProps: (req) => ({ doctorId: req.doctorId ? String(req.doctorId) : undefined, via: req.authVia }),
+  serializers: {
+    req: (req) => ({ method: req.method, url: req.url, ip: req.remoteAddress }),
+    res: (res) => ({ status: res.statusCode }),
+  },
+}));
+
+// CORS: comma-separated list in CORS_ORIGINS, falling back to local + prod.
+// With cookie sessions the API must be same-site with the frontend
+// (e.g. api.ankad.in for www.ankad.in) or browsers won't send the cookie.
+const allowedOrigins = (process.env.CORS_ORIGINS || "http://localhost:3000,https://www.ankad.in")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
 
 app.use(cors({
   origin: function(origin, callback) {
@@ -50,6 +67,9 @@ app.use(globalLimiter);
 app.use(express.json({ limit: "100kb" }));
 app.use(express.urlencoded({ extended: true, limit: "100kb" }));
 app.use(cookieParser());
+
+// Cookie-authenticated POST/PUT/DELETE must come from our own frontend.
+app.use(csrfOriginCheck(allowedOrigins));
 
 // Strip `$` and `.` from keys in body/query/params so operators like
 // {"$gt": ""} can never reach a Mongo query.
@@ -107,9 +127,9 @@ app.use((err, req, res, next) => {
   if (err.type === "entity.too.large") {
     return res.status(413).json({ success: false, message: "Request body too large." });
   }
-  console.error("Unhandled error:", err.message);
+  logger.error({ err: err.message, url: req.originalUrl }, "unhandled error");
   res.status(500).json({ success: false, message: "Something went wrong." });
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+app.listen(PORT, () => logger.info({ port: PORT }, "server started"));

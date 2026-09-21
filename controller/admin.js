@@ -1,10 +1,10 @@
 const Patient = require("../models/patient");
-const mongoose = require("mongoose");
 const Report = require("../models/report");
 const Doctor = require("../models/doctor");
 const { uploadImageToCloudinary, ImageValidationError } = require("../utils/imageuploader");
-const { isStr } = require("../utils/validate");
 const { presentPatient, presentReport, WITHOUT_PATIENT_IMAGES, WITHOUT_REPORT_IMAGES } = require("../utils/imageAccess");
+const AuditLog = require("../models/auditLog");
+const audit = require("../utils/audit");
 
 const MAX_DERMOSCOPE_PHOTOS = 10;
 
@@ -77,10 +77,6 @@ exports.getPatientDetailsAdmin = async (req, res) => {
     try {
         const { patientId } = req.params;
 
-        if (!mongoose.isValidObjectId(patientId)) {
-            return res.status(400).json({ success: false, message: "Invalid patient id." });
-        }
-
         const patient = await Patient.findOne({ _id: patientId })
             .populate('doctor', 'firstname lastname email'); // ✅ ADDED: Populate doctor details
 
@@ -96,6 +92,7 @@ exports.getPatientDetailsAdmin = async (req, res) => {
             report = await Report.findOne({ patient: patient._id });
         }
 
+        audit(req, "patient.viewed", { target: { type: "patient", id: patient._id }, meta: { withReport: !!report } });
         return res.status(200).json({
             success: true,
             message: report ? "Patient details with report fetched successfully." : "Patient details fetched successfully.",
@@ -114,14 +111,8 @@ exports.generateReport = async (req, res) => {
 
     try {
         const { patientId } = req.params;
+        // Text fields already validated by validation/schemas.js#generateReport.
         const { dermoscopeFindings, clinicalImpression } = req.body;
-
-        if (!mongoose.isValidObjectId(patientId)) {
-            return res.status(400).json({ success: false, message: "Invalid patient id." });
-        }
-        if (!isStr(dermoscopeFindings, 5000) || !isStr(clinicalImpression, 5000)) {
-            return res.status(400).json({ success: false, message: "Please fill all details to generate the report" });
-        }
 
         if (!req.files || !req.files.editedNakedEyePhoto || !req.files.editedDermoscopePhotos) {
             return res.status(400).json({ success: false, message: "Missing required image files." });
@@ -170,6 +161,7 @@ exports.generateReport = async (req, res) => {
         patient.status = "done";
         await patient.save();
 
+        audit(req, "report.generated", { target: { type: "report", id: newReport._id }, meta: { patientId: patient._id } });
         return res.status(201).json({
             success: true,
             message: "Report generated successfully.",
@@ -217,10 +209,6 @@ exports.getReportById = async (req, res) => {
     try {
         const { reportId } = req.params;
 
-        if (!mongoose.isValidObjectId(reportId)) {
-            return res.status(400).json({ success: false, message: "Invalid report id." });
-        }
-
         const report = await Report.findById(reportId).populate("patient doctor", "firstname lastname age gender");
 
         if (!report) {
@@ -230,6 +218,7 @@ exports.getReportById = async (req, res) => {
             });
         }
 
+        audit(req, "report.viewed", { target: { type: "report", id: report._id } });
         res.status(200).json({
             success: true,
             message: "Report fetched successfully.",
@@ -270,3 +259,25 @@ exports.getMe = async (req, res) => {
       });
     }
   };
+
+// Admin: page through the audit trail, newest first. Cursor on createdAt.
+exports.getAuditLog = async (req, res) => {
+    try {
+        const { limit, before, action, actor, targetId } = req.query;
+        const filter = {};
+        if (before) filter.createdAt = { $lt: new Date(before) };
+        if (action) filter.action = action;
+        if (actor) filter.actor = actor;
+        if (targetId) filter["target.id"] = targetId;
+
+        const rows = await AuditLog.find(filter).sort({ createdAt: -1 }).limit(limit).lean();
+        res.status(200).json({
+            success: true,
+            data: rows,
+            nextBefore: rows.length === limit ? rows[rows.length - 1].createdAt : null,
+        });
+    } catch (error) {
+        console.error("getAuditLog error:", error.message);
+        res.status(500).json({ success: false, message: "Error fetching audit log." });
+    }
+};

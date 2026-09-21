@@ -2,7 +2,7 @@ const bcrypt = require("bcryptjs");
 const Doctor = require("../models/doctor");
 const { sendResetEmail } = require("../utils/mailsender");
 const { randomToken, sha256 } = require("../utils/crypto");
-const { isEmail, normalizeEmail, isPassword, passwordRule } = require("../utils/validate");
+const audit = require("../utils/audit");
 
 const BCRYPT_ROUNDS = 12;
 const RESET_TTL_MS = 60 * 60 * 1000;
@@ -14,13 +14,10 @@ const GENERIC_MESSAGE = "If an account exists for that email, a password reset l
 // identical whether or not the email is registered.
 exports.resetPasswordToken = async (req, res) => {
   try {
-    const { email: rawEmail } = req.body;
-    if (!isEmail(rawEmail)) {
-      return res.status(400).json({ success: false, error: "Please enter a valid email." });
-    }
-    const email = normalizeEmail(rawEmail);
+    const { email } = req.body;
 
     const user = await Doctor.findOne({ email });
+    audit(req, "password.reset_requested", { actorEmail: email, outcome: user ? "success" : "failure" });
     if (user) {
       const token = randomToken(32);
       await Doctor.updateOne(
@@ -41,17 +38,7 @@ exports.resetPasswordToken = async (req, res) => {
 // cleared on use. All existing sessions are revoked.
 exports.resetPassword = async (req, res) => {
   try {
-    const { password, confirmPassword, token } = req.body;
-
-    if (typeof token !== "string" || !/^[0-9a-f]{64}$/.test(token)) {
-      return res.status(400).json({ success: false, error: "Reset link is invalid or has expired." });
-    }
-    if (!isPassword(password)) {
-      return res.status(400).json({ success: false, error: passwordRule });
-    }
-    if (confirmPassword !== password) {
-      return res.status(400).json({ success: false, error: "Password and confirm password do not match." });
-    }
+    const { password, token } = req.body;
 
     const user = await Doctor.findOne({
       resetPasswordTokenHash: sha256(token),
@@ -59,6 +46,7 @@ exports.resetPassword = async (req, res) => {
     }).select("+resetPasswordTokenHash +resetPasswordExpires");
 
     if (!user) {
+      audit(req, "password.reset_failed", { outcome: "failure" });
       return res.status(400).json({ success: false, error: "Reset link is invalid or has expired." });
     }
 
@@ -69,6 +57,7 @@ exports.resetPassword = async (req, res) => {
     user.lockUntil = undefined;
     user.tokenVersion = (user.tokenVersion || 0) + 1;
     await user.save();
+    audit(req, "password.reset", { actorEmail: user.email, target: { type: "doctor", id: user._id } });
 
     res.status(200).json({ success: true, message: "Password reset successful. Please log in." });
   } catch (error) {

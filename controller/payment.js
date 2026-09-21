@@ -1,8 +1,8 @@
 const Razorpay = require("razorpay");
-const mongoose = require("mongoose");
 const Patient = require("../models/patient");
 const { safeEqual } = require("../utils/crypto");
 const crypto = require("crypto");
+const audit = require("../utils/audit");
 
 const razorpay = new Razorpay({
     key_id: process.env.RAZORPAY_KEY_ID?.trim(),
@@ -17,9 +17,6 @@ const REPORT_FEE_PAISE = REPORT_FEE_INR * 100;
 exports.createPayment = async (req, res) => {
     try {
         const { patientId } = req.body;
-        if (!mongoose.isValidObjectId(patientId)) {
-            return res.status(400).json({ success: false, message: "Invalid patient id." });
-        }
 
         const patient = await Patient.findOne({ _id: patientId, doctor: req.doctorId });
         if (!patient) {
@@ -61,10 +58,6 @@ exports.createPayment = async (req, res) => {
 exports.verifyPayment = async (req, res) => {
     try {
         const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
-        const isId = (v) => typeof v === "string" && /^[A-Za-z0-9_]{1,64}$/.test(v);
-        if (!isId(razorpay_order_id) || !isId(razorpay_payment_id) || typeof razorpay_signature !== "string" || razorpay_signature.length > 128) {
-            return res.status(400).json({ success: false, message: "Invalid payment details." });
-        }
 
         const patient = await Patient.findOne({ razorpayOrderId: razorpay_order_id, doctor: req.doctorId });
         if (!patient) {
@@ -81,6 +74,7 @@ exports.verifyPayment = async (req, res) => {
             .digest("hex");
 
         if (!safeEqual(expected, razorpay_signature)) {
+            audit(req, "payment.verify_failed", { outcome: "failure", target: { type: "patient", id: patient._id }, meta: { reason: "signature" } });
             return res.status(400).json({ success: false, message: "Invalid payment signature." });
         }
 
@@ -104,6 +98,7 @@ exports.verifyPayment = async (req, res) => {
         patient.paymentDate = new Date();
         await patient.save();
 
+        audit(req, "payment.verified", { target: { type: "patient", id: patient._id }, meta: { paymentId: razorpay_payment_id, amount: patient.amountPaid } });
         res.status(200).json({ success: true, message: "Payment verified and patient updated." });
     } catch (error) {
         console.error("verifyPayment error:", error.message);
