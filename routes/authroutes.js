@@ -3,7 +3,7 @@ const { sendOtp, verifyOtp, login, changePassword, logoutController } = require(
 const { auth, mfaPendingAuth } = require("../middlewares/authmiddleware");
 const { resetPasswordToken, resetPassword } = require("../controller/resetpassword");
 const mfa = require("../controller/mfa");
-const { authLimiter, emailLimiter } = require("../middlewares/rateLimiters");
+const { authLimiter, loginLimiter, mfaLimiter, emailLimiter } = require("../middlewares/rateLimiters");
 const { validate } = require("../middlewares/validate");
 const schemas = require("../validation/schemas");
 
@@ -14,13 +14,13 @@ router.post("/send-otp", emailLimiter, validate(schemas.sendOtp), sendOtp);
 router.post("/verify-otp", authLimiter, validate(schemas.verifyOtp), verifyOtp);
 
 // Login: password → (MFA cookie → /mfa/verify) → session cookie
-router.post("/login", authLimiter, validate(schemas.login), login);
-router.post("/mfa/verify", authLimiter, mfaPendingAuth, validate(schemas.mfaLoginCode), mfa.verifyLogin);
+router.post("/login", loginLimiter, validate(schemas.login), login);
+router.post("/mfa/verify", mfaLimiter, mfaPendingAuth, validate(schemas.mfaLoginCode), mfa.verifyLogin);
 
 // MFA enrolment (optional): a logged-in doctor turns it on, or re-enrols a new device
-router.post("/mfa/setup", authLimiter, auth, mfa.setup);
-router.post("/mfa/confirm", authLimiter, auth, validate(schemas.mfaCode), mfa.confirm);
-router.post("/mfa/disable", authLimiter, auth, validate(schemas.mfaDisable), mfa.disable);
+router.post("/mfa/setup", mfaLimiter, auth, mfa.setup);
+router.post("/mfa/confirm", mfaLimiter, auth, validate(schemas.mfaCode), mfa.confirm);
+router.post("/mfa/disable", mfaLimiter, auth, validate(schemas.mfaDisable), mfa.disable);
 
 // Account
 router.post("/change-password", authLimiter, auth, validate(schemas.changePassword), changePassword);
