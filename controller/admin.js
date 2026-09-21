@@ -162,7 +162,8 @@ exports.generateReport = async (req, res) => {
         patient.status = "done";
         await patient.save();
 
-        audit(req, "report.generated", { target: { type: "report", id: newReport._id }, meta: { patientId: patient._id } });
+        // Filed under the patient so "everything that happened to this case" is one query.
+        audit(req, "report.generated", { target: { type: "patient", id: patient._id }, meta: { reportId: newReport._id } });
         return res.status(201).json({
             success: true,
             message: "Report generated successfully.",

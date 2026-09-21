@@ -68,10 +68,6 @@ app.use(cookieParser());
 // Cookie-authenticated POST/PUT/DELETE must come from our own frontend.
 app.use(csrfOriginCheck(allowedOrigins));
 
-// Strip `$` and `.` from keys in body/query/params so operators like
-// {"$gt": ""} can never reach a Mongo query.
-app.use(mongoSanitize());
-
 // For file uploads
 // Per-file size cap so an oversized request fails fast with a clear message
 // instead of exhausting server memory. Cloudinary's free-plan cap is 10 MB;
@@ -92,6 +88,11 @@ app.use(fileUpload({
   },
 }));
 app.use(cleanupTempFiles);
+
+// Strip `$` and `.` from keys in body/query/params so operators like
+// {"$gt": ""} can never reach a Mongo query. After fileUpload so multipart
+// fields are covered too.
+app.use(mongoSanitize());
 
 // Cloudinary configuration
 cloudinary.config({
