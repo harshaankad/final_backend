@@ -63,3 +63,17 @@ exports.sendResetEmail = async (email, url) => {
     ),
   });
 };
+
+// Sent by jobs/securityAlerts.js to the admin mailbox.
+exports.sendSecurityAlertEmail = async (lines) => {
+  await transporter.sendMail({
+    from: FROM,
+    to: process.env.ALERT_EMAIL || process.env.EMAIL,
+    subject: "DermaDrishti security alert",
+    html: shell(
+      "Unusual authentication activity was detected.",
+      `<ul style="text-align:left; color:#242424; font-size:14px; line-height:1.8;">${lines.map((l) => `<li>${l}</li>`).join("")}</ul>
+       <p style="color:#555; font-size:14px; line-height:1.6;">Review the audit log in the admin area. If this looks like an attack, consider rotating credentials for the affected accounts.</p>`
+    ),
+  });
+};

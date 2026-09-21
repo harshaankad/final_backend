@@ -3,6 +3,10 @@ const { uploadImageToCloudinary, ImageValidationError } = require("../utils/imag
 const Report = require("../models/report");
 const { presentPatient, presentReport, WITHOUT_PATIENT_IMAGES } = require("../utils/imageAccess");
 const audit = require("../utils/audit");
+const { deletePatientRecord } = require("../services/patientDeletion");
+
+// Bump when the consent wording shown to doctors changes.
+const CONSENT_VERSION = "2026-09";
 
 const MAX_DERMOSCOPE_PHOTOS = 10;
 
@@ -47,6 +51,7 @@ exports.createPatient = async (req, res) => {
       clinicalImpression,
       nakedEyePhoto: nakedEyeUpload.publicId,
       dermoscopePhotos: dermoscopePhotoIds,
+      consent: { given: true, at: new Date(), version: CONSENT_VERSION },
       status: "pending",
       paymentStatus: "pending",
       amountPaid: 0,
@@ -164,5 +169,37 @@ exports.getPatientDetails = async (req, res) => {
             success: false,
             message: "Error fetching patient details.",
         });
+    }
+};
+
+// Erase a patient record (DB rows + every image). Doctors may only remove
+// their own patients that never completed payment — an abandoned upload.
+// Completed cases are medical records; only an admin can erase those (e.g.
+// on a patient's request via the grievance officer).
+exports.deletePatient = async (req, res) => {
+    try {
+        const { patientId } = req.params;
+        const filter = { _id: patientId };
+        if (req.role !== "admin") filter.doctor = req.doctorId;
+
+        const patient = await Patient.findOne(filter);
+        if (!patient) {
+            return res.status(404).json({ success: false, message: "Patient not found." });
+        }
+        if (req.role !== "admin" && patient.paymentStatus === "completed") {
+            audit(req, "patient.delete_denied", { outcome: "failure", target: { type: "patient", id: patient._id } });
+            return res.status(403).json({
+                success: false,
+                message: "Completed cases are part of the medical record. Please contact the grievance officer to request erasure.",
+            });
+        }
+
+        const result = await deletePatientRecord(patient);
+        audit(req, "patient.deleted", { target: { type: "patient", id: patient._id }, meta: { ...result, paymentStatus: patient.paymentStatus } });
+
+        res.status(200).json({ success: true, message: "Patient record and all images deleted." });
+    } catch (error) {
+        console.error("deletePatient error:", error.message);
+        res.status(500).json({ success: false, message: "Error deleting patient." });
     }
 };

@@ -32,6 +32,7 @@ exports.login = z.object({ email, password: z.string().min(1).max(PASSWORD_MAX) 
 
 exports.mfaCode = z.object({ code: totp }).strict();
 exports.mfaLoginCode = z.object({ code: z.union([totp, backupCode]) }).strict();
+exports.mfaDisable = z.object({ password: z.string().min(1).max(PASSWORD_MAX), code: z.union([totp, backupCode]) }).strict();
 
 exports.changePassword = z
   .object({ oldPassword: z.string().min(1).max(PASSWORD_MAX), newPassword: password })
@@ -69,6 +70,8 @@ exports.createPatient = z
     siteOfInfection: shortText(500),
     previousTreatment: shortText(2000),
     clinicalImpression: z.string().trim().max(2000).optional().or(z.literal("")),
+    // FormData sends strings; the checkbox must be explicitly ticked.
+    consent: z.literal("true", { message: "Patient consent must be confirmed before uploading." }),
   })
   .strip();
 

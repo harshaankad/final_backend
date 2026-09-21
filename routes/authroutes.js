@@ -20,6 +20,7 @@ router.post("/mfa/verify", authLimiter, mfaPendingAuth, validate(schemas.mfaLogi
 // MFA enrolment (optional): a logged-in doctor turns it on, or re-enrols a new device
 router.post("/mfa/setup", authLimiter, auth, mfa.setup);
 router.post("/mfa/confirm", authLimiter, auth, validate(schemas.mfaCode), mfa.confirm);
+router.post("/mfa/disable", authLimiter, auth, validate(schemas.mfaDisable), mfa.disable);
 
 // Account
 router.post("/change-password", authLimiter, auth, validate(schemas.changePassword), changePassword);

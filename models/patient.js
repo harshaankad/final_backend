@@ -12,8 +12,18 @@ const patientSchema = new mongoose.Schema({
   previousTreatment: String,
   clinicalImpression: String,
 
-  nakedEyePhoto: String, // single photo
-  dermoscopePhotos: [String], // now supports multiple photos
+  nakedEyePhoto: String, // Cloudinary public_id (authenticated asset)
+  dermoscopePhotos: [String],
+  // Originals are removed by the retention job some time after the report
+  // is done; the annotated copies on the report remain the record.
+  originalsPurgedAt: Date,
+
+  // Recorded by the submitting doctor on behalf of the patient (DPDP).
+  consent: {
+    given: { type: Boolean, default: false },
+    at: Date,
+    version: String, // which wording of the consent text was shown
+  },
 
   status: { type: String, enum: ["pending", "done"], default: "pending" },
 

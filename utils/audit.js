@@ -20,5 +20,11 @@ module.exports = (req, action, { target, meta, outcome = "success", actorEmail }
     userAgent: (req.get("user-agent") || "").slice(0, 300),
     meta,
   };
-  AuditLog.create(row).catch((err) => logger.error({ err: err.message, action }, "audit write failed"));
+  return AuditLog.create(row).catch((err) => logger.error({ err: err.message, action }, "audit write failed"));
 };
+
+// Same, for background jobs where there is no request or human actor.
+// Returns the write promise so a job can await it before reporting done.
+module.exports.system = (action, { target, meta, outcome = "success" } = {}) =>
+  AuditLog.create({ action, actorEmail: "system", actorRole: "system", target, meta, outcome })
+    .catch((err) => logger.error({ err: err.message, action }, "audit write failed"));

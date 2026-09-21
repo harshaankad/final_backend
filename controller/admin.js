@@ -5,6 +5,7 @@ const { uploadImageToCloudinary, ImageValidationError } = require("../utils/imag
 const { presentPatient, presentReport, WITHOUT_PATIENT_IMAGES, WITHOUT_REPORT_IMAGES } = require("../utils/imageAccess");
 const AuditLog = require("../models/auditLog");
 const audit = require("../utils/audit");
+const { deleteDoctorRecord } = require("../services/patientDeletion");
 
 const MAX_DERMOSCOPE_PHOTOS = 10;
 
@@ -279,5 +280,32 @@ exports.getAuditLog = async (req, res) => {
     } catch (error) {
         console.error("getAuditLog error:", error.message);
         res.status(500).json({ success: false, message: "Error fetching audit log." });
+    }
+};
+
+// Admin: erase a doctor account together with all of their patients,
+// reports and images (right-to-erasure fulfilment). Admins cannot erase
+// themselves or another admin from here.
+exports.deleteDoctor = async (req, res) => {
+    try {
+        const { doctorId } = req.params;
+        if (String(doctorId) === String(req.doctorId)) {
+            return res.status(400).json({ success: false, message: "You cannot delete your own account from here." });
+        }
+        const doctor = await Doctor.findById(doctorId);
+        if (!doctor) {
+            return res.status(404).json({ success: false, message: "Doctor not found." });
+        }
+        if (doctor.role === "admin") {
+            return res.status(403).json({ success: false, message: "Admin accounts cannot be deleted through the API." });
+        }
+
+        const result = await deleteDoctorRecord(doctor);
+        audit(req, "doctor.deleted", { target: { type: "doctor", id: doctor._id }, meta: { email: doctor.email, ...result } });
+
+        res.status(200).json({ success: true, message: "Doctor account, patients, reports and images deleted.", ...result });
+    } catch (error) {
+        console.error("deleteDoctor error:", error.message);
+        res.status(500).json({ success: false, message: "Error deleting doctor." });
     }
 };

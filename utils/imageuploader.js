@@ -114,3 +114,21 @@ exports.uploadImageToCloudinary = async (file, folder) => {
         for (const p of tempOutputs) await fs.unlink(p).catch(() => {});
     }
 };
+
+// Remove an image from Cloudinary. Accepts a public_id (authenticated asset)
+// or a pre-migration public URL. Missing assets are treated as deleted.
+const LEGACY_URL_RE = /^https?:\/\/res\.cloudinary\.com\/[^/]+\/image\/upload\/(?:v\d+\/)?(.+?)\.[a-z0-9]+$/i;
+exports.deleteImage = async (ref) => {
+    if (!ref) return;
+    let publicId = ref;
+    let type = "authenticated";
+    const legacy = typeof ref === "string" && ref.match(LEGACY_URL_RE);
+    if (legacy) {
+        publicId = legacy[1];
+        type = "upload";
+    }
+    const result = await cloudinary.uploader.destroy(publicId, { type, resource_type: "image", invalidate: true });
+    if (result.result !== "ok" && result.result !== "not found") {
+        throw new Error(`Cloudinary destroy failed for ${publicId}: ${result.result}`);
+    }
+};

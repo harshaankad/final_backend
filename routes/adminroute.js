@@ -1,5 +1,5 @@
 const express = require("express");
-const { getAllCompletedPayments, getCompletedPaymentsDoneStatus, getCompletedPaymentsPendingStatus, getPatientDetailsAdmin, generateReport, getAllReports, getReportById, getMe, getAuditLog } = require("../controller/admin");
+const { getAllCompletedPayments, getCompletedPaymentsDoneStatus, getCompletedPaymentsPendingStatus, getPatientDetailsAdmin, generateReport, getAllReports, getReportById, getMe, getAuditLog, deleteDoctor } = require("../controller/admin");
 const { auth, isAdmin } = require("../middlewares/authmiddleware");
 const { getAnalytics } = require("../controller/analytics");
 const { uploadLimiter } = require("../middlewares/rateLimiters");
@@ -17,6 +17,7 @@ router.get("/admin-all-reports", auth, isAdmin, getAllReports);
 router.get("/admin-report/:reportId", auth, isAdmin, validateParam("reportId"), getReportById);
 router.get("/admin-analytics", auth, isAdmin, validate(schemas.analyticsQuery, "query"), getAnalytics);
 router.get("/admin-audit", auth, isAdmin, validate(schemas.auditQuery, "query"), getAuditLog);
+router.delete("/admin-doctor/:doctorId", auth, isAdmin, validateParam("doctorId"), deleteDoctor);
 router.get("/me", auth, getMe);
 
 module.exports = router;

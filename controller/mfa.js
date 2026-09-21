@@ -6,6 +6,7 @@ const { signSessionToken, publicDoctor } = require("../utils/tokens");
 const { isTotpCode } = require("../utils/validate");
 const { setSessionCookie, clearMfaCookie } = require("../utils/cookies");
 const audit = require("../utils/audit");
+const bcrypt = require("bcryptjs");
 
 const ISSUER = "DermaDrishti";
 const BACKUP_CODE_COUNT = 8;
@@ -153,5 +154,46 @@ exports.verifyLogin = async (req, res) => {
   } catch (error) {
     console.error("mfa verify error:", error.message);
     res.status(500).json({ success: false, error: "Could not verify code." });
+  }
+};
+
+// Turn MFA off. Requires the password and a current code (or backup code)
+// so a hijacked session alone cannot weaken the account. Signs out every
+// other device.
+exports.disable = async (req, res) => {
+  try {
+    const { password, code } = req.body;
+
+    const doctor = await Doctor.findById(req.doctorId).select("+password +mfaSecret +mfaBackupCodes +mfaLastUsedStep");
+    if (!doctor) return res.status(404).json({ success: false, error: "Doctor not found." });
+    if (!doctor.mfaEnabled) return res.status(400).json({ success: false, error: "Two-step verification is not enabled." });
+
+    const passwordOk = await bcrypt.compare(password, doctor.password);
+    let codeOk = false;
+    if (isTotpCode(code)) {
+      const result = await verify({ secret: decrypt(doctor.mfaSecret), token: code, epochTolerance: EPOCH_TOLERANCE });
+      codeOk = result.valid;
+    } else {
+      codeOk = (doctor.mfaBackupCodes || []).includes(sha256(normalizeBackupCode(code)));
+    }
+    if (!passwordOk || !codeOk) {
+      audit(req, "mfa.disable_failed", { outcome: "failure" });
+      return res.status(401).json({ success: false, error: "Password or code is incorrect." });
+    }
+
+    doctor.mfaEnabled = false;
+    doctor.mfaSecret = undefined;
+    doctor.mfaPendingSecret = undefined;
+    doctor.mfaBackupCodes = [];
+    doctor.mfaLastUsedStep = undefined;
+    doctor.tokenVersion = (doctor.tokenVersion || 0) + 1;
+    await doctor.save();
+
+    setSessionCookie(res, signSessionToken(doctor));
+    audit(req, "mfa.disabled");
+    res.status(200).json({ success: true, doctor: publicDoctor(doctor), message: "Two-step verification turned off." });
+  } catch (error) {
+    console.error("mfa disable error:", error.message);
+    res.status(500).json({ success: false, error: "Could not turn off two-step verification." });
   }
 };

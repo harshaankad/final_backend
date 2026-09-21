@@ -4,6 +4,8 @@ const json = (message) => ({
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, error: message },
+  // The test suite hammers auth endpoints from one IP.
+  skip: () => process.env.NODE_ENV === "test",
 });
 
 // Whole API: generous, catches scripted scraping.
