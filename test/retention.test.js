@@ -6,6 +6,9 @@ process.env.NODE_ENV = "test";
 process.env.LOG_LEVEL = "silent";
 // Test files run concurrently, so each uses its own database.
 process.env.MONGO_URI = (process.env.MONGO_URI_TEST || "mongodb://127.0.0.1:27017/ankad_test") + "_retention";
+// Pin the windows so these tests describe the rules, not today's defaults.
+process.env.UNPAID_RETENTION_DAYS = "7";
+process.env.IMAGE_RETENTION_DAYS = "90";
 for (const [k, v] of Object.entries({ JWT_SECRET: "t".repeat(64), MFA_ENCRYPTION_KEY: "a".repeat(64), CLOUD_NAME: "dummy", API_KEY: "1", API_SECRET: "dummy", EMAIL: "t@example.com", EMAIL_PASSWORD: "x" })) process.env[k] ||= v;
 
 const mongoose = require("mongoose");

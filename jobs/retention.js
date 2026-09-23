@@ -7,7 +7,10 @@ const logger = require("../utils/logger");
 // Data minimisation. Two rules, both configurable via env:
 //
 //  1. Uploads that never reached payment are abandoned submissions — the
-//     photos serve no purpose. Erased after UNPAID_RETENTION_DAYS.
+//     photos serve no purpose. Erased after UNPAID_RETENTION_DAYS. The
+//     default is 30 days: short enough to not hoard unpaid photographs,
+//     long enough that a clinic which is slow to pay doesn't lose a real
+//     patient's images.
 //  2. Photographs are kept for a limited period only, as the report
 //     disclaimer tells patients. IMAGE_RETENTION_DAYS after the report is
 //     generated, every image for that case is deleted — the doctor's
@@ -16,7 +19,7 @@ const logger = require("../utils/logger");
 //
 // Set RETENTION_ENABLED=false to turn both off.
 const DAY_MS = 24 * 60 * 60 * 1000;
-const UNPAID_DAYS = Number(process.env.UNPAID_RETENTION_DAYS) || 7;
+const UNPAID_DAYS = Number(process.env.UNPAID_RETENTION_DAYS) || 30;
 const IMAGE_DAYS = Number(process.env.IMAGE_RETENTION_DAYS || process.env.ORIGINAL_PHOTO_RETENTION_DAYS) || 90;
 const BATCH = 50;
 
