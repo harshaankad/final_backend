@@ -14,9 +14,9 @@ const patientSchema = new mongoose.Schema({
 
   nakedEyePhoto: String, // Cloudinary public_id (authenticated asset)
   dermoscopePhotos: [String],
-  // Originals are removed by the retention job some time after the report
-  // is done; the annotated copies on the report remain the record.
-  originalsPurgedAt: Date,
+  // Set when the retention job deletes this case's photographs (originals
+  // and the report's annotated copies). The written record stays.
+  imagesPurgedAt: Date,
 
   // Recorded by the submitting doctor on behalf of the patient (DPDP).
   consent: {

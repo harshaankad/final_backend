@@ -1,6 +1,6 @@
 const Patient = require("../models/patient");
 const Report = require("../models/report");
-const { deletePatientRecord, purgeOriginals } = require("../services/patientDeletion");
+const { deletePatientRecord, purgeImages } = require("../services/patientDeletion");
 const audit = require("../utils/audit");
 const logger = require("../utils/logger");
 
@@ -8,19 +8,20 @@ const logger = require("../utils/logger");
 //
 //  1. Uploads that never reached payment are abandoned submissions — the
 //     photos serve no purpose. Erased after UNPAID_RETENTION_DAYS.
-//  2. Once a report exists, the annotated copies on the report are the
-//     medical record; the raw originals are the most sensitive thing we
-//     hold and nothing displays them any more. Removed
-//     ORIGINAL_PHOTO_RETENTION_DAYS after the report was generated.
+//  2. Photographs are kept for a limited period only, as the report
+//     disclaimer tells patients. IMAGE_RETENTION_DAYS after the report is
+//     generated, every image for that case is deleted — the doctor's
+//     originals and the annotated copies on the report alike. The written
+//     report (findings, impression, patient details) is kept.
 //
 // Set RETENTION_ENABLED=false to turn both off.
 const DAY_MS = 24 * 60 * 60 * 1000;
 const UNPAID_DAYS = Number(process.env.UNPAID_RETENTION_DAYS) || 7;
-const ORIGINAL_DAYS = Number(process.env.ORIGINAL_PHOTO_RETENTION_DAYS) || 90;
+const IMAGE_DAYS = Number(process.env.IMAGE_RETENTION_DAYS || process.env.ORIGINAL_PHOTO_RETENTION_DAYS) || 90;
 const BATCH = 50;
 
 exports.runRetention = async () => {
-  const summary = { unpaidDeleted: 0, originalsPurged: 0, failed: 0 };
+  const summary = { unpaidDeleted: 0, imagesPurged: 0, failed: 0 };
 
   const unpaid = await Patient.find({
     paymentStatus: { $ne: "completed" },
@@ -37,22 +38,21 @@ exports.runRetention = async () => {
     }
   }
 
-  const cutoff = new Date(Date.now() - ORIGINAL_DAYS * DAY_MS);
+  const cutoff = new Date(Date.now() - IMAGE_DAYS * DAY_MS);
   const oldReports = await Report.find({ createdAt: { $lt: cutoff } }).select("patient").limit(BATCH * 4).lean();
   const candidates = await Patient.find({
     _id: { $in: oldReports.map((r) => r.patient) },
     status: "done",
-    originalsPurgedAt: { $exists: false },
-    $or: [{ nakedEyePhoto: { $exists: true, $ne: null } }, { "dermoscopePhotos.0": { $exists: true } }],
+    imagesPurgedAt: { $exists: false },
   }).limit(BATCH);
   for (const p of candidates) {
     try {
-      const n = await purgeOriginals(p);
-      summary.originalsPurged++;
-      await audit.system("retention.originals_purged", { target: { type: "patient", id: p._id }, meta: { images: n, afterDays: ORIGINAL_DAYS } });
+      const n = await purgeImages(p);
+      summary.imagesPurged++;
+      await audit.system("retention.images_purged", { target: { type: "patient", id: p._id }, meta: { images: n, afterDays: IMAGE_DAYS } });
     } catch (err) {
       summary.failed++;
-      logger.error({ err: err.message, patientId: String(p._id) }, "retention: originals purge failed");
+      logger.error({ err: err.message, patientId: String(p._id) }, "retention: image purge failed");
     }
   }
 

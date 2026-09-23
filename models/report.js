@@ -12,6 +12,9 @@ const reportSchema = new mongoose.Schema({
 
   digitalSignature: String,
 
+  // Set when the retention job removes this report's images.
+  imagesPurgedAt: Date,
+
   reportStatus: { type: String, enum: ["pending", "completed"], default: "pending" },
 
   createdAt: { type: Date, default: Date.now },

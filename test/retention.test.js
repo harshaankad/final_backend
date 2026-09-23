@@ -1,5 +1,5 @@
-// Retention job rules, on fixtures without images (no Cloudinary calls).
-const { test, before, after } = require("node:test");
+// Retention job rules. deleteImage is stubbed, so no Cloudinary calls are made.
+const { test, before, after, beforeEach } = require("node:test");
 const assert = require("node:assert/strict");
 
 process.env.NODE_ENV = "test";
@@ -13,7 +13,12 @@ const Doctor = require("../models/doctor");
 const Patient = require("../models/patient");
 const Report = require("../models/report");
 const AuditLog = require("../models/auditLog");
+const imageuploader = require("../utils/imageuploader");
 const { runRetention } = require("../jobs/retention");
+
+// Record what would have been deleted instead of calling Cloudinary.
+let deleted = [];
+imageuploader.deleteImage = async (ref) => { deleted.push(ref); };
 
 const DAY = 24 * 60 * 60 * 1000;
 const ago = (days) => new Date(Date.now() - days * DAY);
@@ -28,33 +33,64 @@ after(async () => {
   await mongoose.connection.dropDatabase();
   await mongoose.disconnect();
 });
+beforeEach(() => { deleted = []; });
 
 const patient = (extra) =>
   Patient.create({ doctor: doctor._id, firstname: "P", lastname: "X", age: 30, gender: "male", duration: "1w", siteOfInfection: "Arm", previousTreatment: "none", ...extra });
 
 test("unpaid uploads older than the window are erased; recent and paid ones are kept", async () => {
-  const oldUnpaid = await patient({ paymentStatus: "pending", createdAt: ago(10) });
+  const oldUnpaid = await patient({ paymentStatus: "pending", createdAt: ago(10), nakedEyePhoto: "patients/a", dermoscopePhotos: ["patients/b"] });
   const newUnpaid = await patient({ paymentStatus: "pending", createdAt: ago(2) });
   const oldPaid = await patient({ paymentStatus: "completed", createdAt: ago(10) });
 
   const summary = await runRetention();
 
   assert.equal(summary.unpaidDeleted, 1);
+  assert.deepEqual(deleted.sort(), ["patients/a", "patients/b"]);
   assert.equal(await Patient.countDocuments({ _id: oldUnpaid._id }), 0);
   assert.equal(await Patient.countDocuments({ _id: newUnpaid._id }), 1);
   assert.equal(await Patient.countDocuments({ _id: oldPaid._id }), 1);
   assert.equal(await AuditLog.countDocuments({ action: "retention.unpaid_deleted", "target.id": oldUnpaid._id }), 1);
 });
 
-test("originals are only purged for completed cases with an old report", async () => {
-  const done = await patient({ paymentStatus: "completed", status: "done", nakedEyePhoto: undefined, createdAt: ago(200) });
-  await Report.create({ doctor: doctor._id, patient: done._id, dermoscopeFindings: "x", clinicalImpression: "y", createdAt: ago(120) });
-  const pending = await patient({ paymentStatus: "completed", status: "pending", createdAt: ago(200) });
+test("after the retention period ALL images go — originals and report copies — but the written report stays", async () => {
+  const p = await patient({ paymentStatus: "completed", status: "done", createdAt: ago(200), nakedEyePhoto: "patients/orig1", dermoscopePhotos: ["patients/orig2", "patients/orig3"] });
+  const r = await Report.create({
+    doctor: doctor._id, patient: p._id, dermoscopeFindings: "findings text", clinicalImpression: "impression text",
+    editedNakedEyePhoto: "reports/edit1", editedDermoscopePhotos: ["reports/edit2"], createdAt: ago(120),
+  });
+
+  const summary = await runRetention();
+  assert.equal(summary.imagesPurged, 1);
+  assert.equal(summary.failed, 0);
+
+  // every image, both kinds, handed to Cloudinary for deletion
+  assert.deepEqual(deleted.sort(), ["patients/orig1", "patients/orig2", "patients/orig3", "reports/edit1", "reports/edit2"]);
+
+  const pAfter = await Patient.findById(p._id);
+  assert.equal(pAfter.nakedEyePhoto, undefined);
+  assert.deepEqual([...pAfter.dermoscopePhotos], []);
+  assert.ok(pAfter.imagesPurgedAt instanceof Date);
+
+  const rAfter = await Report.findById(r._id);
+  assert.equal(rAfter.editedNakedEyePhoto, undefined);
+  assert.deepEqual([...rAfter.editedDermoscopePhotos], []);
+  assert.ok(rAfter.imagesPurgedAt instanceof Date);
+
+  // the written record survives
+  assert.equal(rAfter.dermoscopeFindings, "findings text");
+  assert.equal(rAfter.clinicalImpression, "impression text");
+  assert.equal(pAfter.firstname, "P");
+  assert.equal(await AuditLog.countDocuments({ action: "retention.images_purged", "target.id": p._id }), 1);
+});
+
+test("a recent report is left alone, and a purged case is not purged twice", async () => {
+  const recent = await patient({ paymentStatus: "completed", status: "done", createdAt: ago(30), nakedEyePhoto: "patients/keep" });
+  await Report.create({ doctor: doctor._id, patient: recent._id, dermoscopeFindings: "x", clinicalImpression: "y", editedNakedEyePhoto: "reports/keep", createdAt: ago(10) });
 
   const summary = await runRetention();
 
-  // `done` has no image refs, so it is not a candidate; nothing should be purged or fail.
-  assert.equal(summary.originalsPurged, 0);
-  assert.equal(summary.failed, 0);
-  assert.equal((await Patient.findById(pending._id)).originalsPurgedAt, undefined);
+  assert.equal(summary.imagesPurged, 0, "nothing else should be eligible");
+  assert.deepEqual(deleted, [], "no image touched");
+  assert.equal((await Patient.findById(recent._id)).nakedEyePhoto, "patients/keep");
 });

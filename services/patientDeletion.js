@@ -1,6 +1,7 @@
 const Patient = require("../models/patient");
 const Report = require("../models/report");
-const { deleteImage } = require("../utils/imageuploader");
+// Called through the module object (not destructured) so tests can stub it.
+const imageuploader = require("../utils/imageuploader");
 const logger = require("../utils/logger");
 
 // Erase everything held for one patient: originals, the report's annotated
@@ -15,7 +16,7 @@ exports.deletePatientRecord = async (patient) => {
     ...reports.flatMap((r) => [r.editedNakedEyePhoto, ...(r.editedDermoscopePhotos || [])]),
   ].filter(Boolean);
 
-  for (const ref of refs) await deleteImage(ref);
+  for (const ref of refs) await imageuploader.deleteImage(ref);
 
   await Report.deleteMany({ patient: patient._id });
   await Patient.deleteOne({ _id: patient._id });
@@ -23,13 +24,28 @@ exports.deletePatientRecord = async (patient) => {
   return { images: refs.length, reports: reports.length };
 };
 
-// Drop only the raw originals once the report (annotated copies) exists.
-exports.purgeOriginals = async (patient) => {
-  const refs = [patient.nakedEyePhoto, ...(patient.dermoscopePhotos || [])].filter(Boolean);
-  for (const ref of refs) await deleteImage(ref);
+// Delete every image held for a completed case — the doctor's originals and
+// the annotated copies on the report — once the retention period is up. The
+// written record (patient details, findings, impression) is kept; only the
+// photographs go, which is what the report disclaimer promises patients.
+exports.purgeImages = async (patient) => {
+  const reports = await Report.find({ patient: patient._id });
+  const refs = [
+    patient.nakedEyePhoto,
+    ...(patient.dermoscopePhotos || []),
+    ...reports.flatMap((r) => [r.editedNakedEyePhoto, ...(r.editedDermoscopePhotos || [])]),
+  ].filter(Boolean);
+
+  for (const ref of refs) await imageuploader.deleteImage(ref);
+
+  const purgedAt = new Date();
   await Patient.updateOne(
     { _id: patient._id },
-    { $unset: { nakedEyePhoto: 1 }, $set: { dermoscopePhotos: [], originalsPurgedAt: new Date() } }
+    { $unset: { nakedEyePhoto: 1 }, $set: { dermoscopePhotos: [], imagesPurgedAt: purgedAt } }
+  );
+  await Report.updateMany(
+    { patient: patient._id },
+    { $unset: { editedNakedEyePhoto: 1 }, $set: { editedDermoscopePhotos: [], imagesPurgedAt: purgedAt } }
   );
   return refs.length;
 };
