@@ -222,13 +222,15 @@ test("audit trail records logins, failures and patient views without secrets", a
   assert.ok(!JSON.stringify(rows).includes(PASSWORD));
 });
 
-test("create-patient requires explicit consent", async () => {
+test("create-patient no longer requires the consent field", async () => {
   const c = client();
   await login(c, "a@test.local");
   const body = { firstname: "P", lastname: "Q", age: 30, gender: "male", duration: "1w", siteOfInfection: "Arm", previousTreatment: "none" };
   const r = await c.call("POST", "/api/create-patient", { body });
+  // Validation passes; the request stops at the (absent) image files instead.
   assert.equal(r.status, 400);
-  assert.match(r.body.message, /consent/i);
+  assert.doesNotMatch(r.body.message, /consent/i);
+  assert.match(r.body.message, /images/i);
 });
 
 test("admin can erase any patient; the audit log records it", async () => {

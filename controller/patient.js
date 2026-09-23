@@ -14,7 +14,7 @@ exports.createPatient = async (req, res) => {
   try {
     const doctorId = req.doctorId;
     // Text fields already validated by validation/schemas.js#createPatient.
-    const { firstname, lastname, age, gender, duration, siteOfInfection, previousTreatment, clinicalImpression } = req.body;
+    const { firstname, lastname, age, gender, duration, siteOfInfection, previousTreatment, clinicalImpression, consent } = req.body;
 
     if (!req.files || !req.files.nakedEyePhoto || !req.files.dermoscopePhotos) {
       return res.status(400).json({
@@ -51,7 +51,7 @@ exports.createPatient = async (req, res) => {
       clinicalImpression,
       nakedEyePhoto: nakedEyeUpload.publicId,
       dermoscopePhotos: dermoscopePhotoIds,
-      consent: { given: true, at: new Date(), version: CONSENT_VERSION },
+      consent: consent === "true" ? { given: true, at: new Date(), version: CONSENT_VERSION } : { given: false },
       status: "pending",
       paymentStatus: "pending",
       amountPaid: 0,

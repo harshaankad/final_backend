@@ -70,8 +70,9 @@ exports.createPatient = z
     siteOfInfection: shortText(500),
     previousTreatment: shortText(2000),
     clinicalImpression: z.string().trim().max(2000).optional().or(z.literal("")),
-    // FormData sends strings; the checkbox must be explicitly ticked.
-    consent: z.literal("true", { message: "Patient consent must be confirmed before uploading." }),
+    // Optional: the consent checkbox was removed from the form on 2026-09-21.
+    // Still accepted so it can be recorded if a client sends it.
+    consent: z.enum(["true", "false"]).optional(),
   })
   .strip();
 
