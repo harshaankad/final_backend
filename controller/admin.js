@@ -6,6 +6,7 @@ const { presentPatient, presentReport, WITHOUT_PATIENT_IMAGES, WITHOUT_REPORT_IM
 const AuditLog = require("../models/auditLog");
 const audit = require("../utils/audit");
 const { deleteDoctorRecord } = require("../services/patientDeletion");
+const { notifyDoctorReportReady } = require("../services/reportNotifications");
 
 const MAX_DERMOSCOPE_PHOTOS = 10;
 
@@ -164,6 +165,15 @@ exports.generateReport = async (req, res) => {
 
         // Filed under the patient so "everything that happened to this case" is one query.
         audit(req, "report.generated", { target: { type: "patient", id: patient._id }, meta: { reportId: newReport._id } });
+
+        // Let the doctor know by email. Not awaited: the report is saved, so a
+        // slow or failing mail server must neither delay nor fail this
+        // response. notifyDoctorReportReady never rejects; the trailing catch
+        // is insurance so nothing here can ever become an unhandled rejection.
+        notifyDoctorReportReady(patient, newReport)
+            .then((sent) => audit(req, "report.notified", { target: { type: "patient", id: patient._id }, meta: { reportId: newReport._id }, outcome: sent ? "success" : "failure" }))
+            .catch((err) => console.error("report.notified audit failed:", err.message));
+
         return res.status(201).json({
             success: true,
             message: "Report generated successfully.",

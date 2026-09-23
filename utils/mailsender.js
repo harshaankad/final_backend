@@ -10,6 +10,10 @@ const transporter = nodemailer.createTransport({
 
 const FROM = `"DermaDrishti" <${process.env.EMAIL}>`;
 
+// Names typed by users end up inside HTML below; never let them inject markup.
+const escapeHtml = (v) =>
+  String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
 const shell = (title, body) => `
   <html>
     <body style="margin:0; padding:0; font-family: 'Segoe UI', sans-serif; background-color:#F4F8F5;">
@@ -74,6 +78,24 @@ exports.sendSecurityAlertEmail = async (lines) => {
       "Unusual authentication activity was detected.",
       `<ul style="text-align:left; color:#242424; font-size:14px; line-height:1.8;">${lines.map((l) => `<li>${l}</li>`).join("")}</ul>
        <p style="color:#555; font-size:14px; line-height:1.6;">Review the audit log in the admin area. If this looks like an attack, consider rotating credentials for the affected accounts.</p>`
+    ),
+  });
+};
+
+// Sent to the submitting doctor once the admin has generated a report for
+// their patient. Only the patient's name goes in the email — never findings
+// or images; those stay behind login at the link.
+exports.sendReportReadyEmail = async ({ to, doctorName, patientName, reportUrl }) => {
+  const greeting = doctorName ? `Hi Dr. ${escapeHtml(doctorName)},` : "Hi,";
+  const who = patientName ? `your patient <strong>${escapeHtml(patientName)}</strong>` : "one of your patients";
+  await transporter.sendMail({
+    from: FROM,
+    to,
+    subject: "A patient report is ready on DermaDrishti",
+    html: shell(
+      `${greeting} the report for ${who} has been generated and is ready to view.`,
+      `<p style="margin:20px 0;"><a href="${reportUrl}" style="display:inline-block; background:#285430; color:#fff; padding:12px 24px; border-radius:8px; text-decoration:none; font-weight:600;">View report</a></p>
+       <p style="color:#555; font-size:14px; line-height:1.6;">You'll need to be logged in to open it. You're receiving this because you submitted this case on DermaDrishti.</p>`
     ),
   });
 };
