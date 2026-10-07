@@ -12,6 +12,7 @@ const MAX_INPUT_PIXELS = 50 * 1000 * 1000;
 const CLOUDINARY_MAX_BYTES = 10 * 1024 * 1024;
 const MIN_JPEG_QUALITY = 40;
 const MIN_DIMENSION = 500;
+const HEIC_MESSAGE = "HEIC photos (the iPhone camera format) can't be processed. Please upload the photo as JPEG or PNG.";
 
 class ImageValidationError extends Error {
     constructor(message) {
@@ -21,6 +22,7 @@ class ImageValidationError extends Error {
     }
 }
 exports.ImageValidationError = ImageValidationError;
+exports.HEIC_MESSAGE = HEIC_MESSAGE;
 
 const sniff = async (path) => {
     let meta;
@@ -34,6 +36,14 @@ const sniff = async (path) => {
     }
     if (!ALLOWED_FORMATS.has(meta.format) || !meta.width || !meta.height) {
         throw new ImageValidationError("That file is not a supported image. Please upload a JPEG, PNG or WebP photo.");
+    }
+    // HEIF comes in two flavours. AVIF (AV1) decodes fine. iPhone HEIC (HEVC)
+    // does not: the prebuilt sharp binary ships no HEVC decoder, so the header
+    // reads but re-encoding fails and the request used to end in a 500.
+    // Refuse it here, before it is uploaded, with a message the doctor can
+    // act on.
+    if (meta.format === "heif" && meta.compression !== "av1") {
+        throw new ImageValidationError(HEIC_MESSAGE);
     }
     return meta;
 };
