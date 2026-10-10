@@ -126,6 +126,59 @@ test("AVIF (the other HEIF flavour) is still accepted", async () => {
   assert.equal(uploads[0].options.folder, "reports");
 });
 
+const solid = (width, height) => sharp({ create: { width, height, channels: 3, background: { r: 200, g: 120, b: 90 } } });
+
+test("a standard 12 MP iPhone photo keeps its full size", async () => {
+  const buf = await solid(4032, 3024).jpeg().toBuffer();
+  await uploadImageToCloudinary(asUpload(buf), "patients");
+  assert.equal(uploads[0].meta.width, 4032);
+  assert.equal(uploads[0].meta.height, 3024);
+});
+
+test("larger photos are scaled so the longest edge is 4096 px", async () => {
+  // 24 MP portrait, stored landscape with orientation 6 like an iPhone.
+  const buf = await solid(5712, 4284).jpeg().withMetadata({ orientation: 6 }).toBuffer();
+  await uploadImageToCloudinary(asUpload(buf), "patients");
+  assert.equal(uploads[0].meta.width, 3072);
+  assert.equal(uploads[0].meta.height, 4096);
+});
+
+test("photos uploaded together are decoded one at a time", async () => {
+  // Each decode needs 100-300 MB; several at once used to exceed the
+  // server's 512 MB and get it killed mid-request.
+  const realToFile = sharp.prototype.toFile;
+  let active = 0;
+  let maxActive = 0;
+  mock.method(sharp.prototype, "toFile", async function (...args) {
+    active++;
+    maxActive = Math.max(maxActive, active);
+    try {
+      return await realToFile.apply(this, args);
+    } finally {
+      active--;
+    }
+  });
+
+  const buf = await gradient(1200, 900).jpeg().toBuffer();
+  await Promise.all(Array.from({ length: 8 }, () => uploadImageToCloudinary(asUpload(buf), "patients")));
+
+  assert.equal(uploads.length, 8);
+  assert.equal(maxActive, 1);
+  assert.deepEqual(leftovers(), []);
+});
+
+test("a failed photo does not block the photos queued behind it", async () => {
+  const good = await gradient().jpeg().toBuffer();
+  const results = await Promise.allSettled([
+    uploadImageToCloudinary(asUpload(Buffer.from("not a photo")), "patients"),
+    uploadImageToCloudinary(asUpload(good), "patients"),
+  ]);
+  assert.equal(results[0].status, "rejected");
+  assert.ok(results[0].reason instanceof ImageValidationError);
+  assert.equal(results[1].status, "fulfilled");
+  assert.equal(uploads.length, 1);
+});
+
 test("a file that is not an image is refused, whatever it claims to be", async () => {
   const file = asUpload(Buffer.from("definitely not a photo"));
   await assert.rejects(uploadImageToCloudinary(file, "patients"), (err) => {

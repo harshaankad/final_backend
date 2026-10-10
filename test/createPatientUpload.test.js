@@ -140,6 +140,32 @@ test("a HEIC disguised as .jpg is still caught by its content", async () => {
   assert.equal((await res.json()).message, HEIC_MESSAGE);
 });
 
+test("a case with 1 clinical + 7 dermoscope iPhone photos is created within the server's memory", async () => {
+  // The case that failed in production on a 512 MB instance: eight 12 MP
+  // portrait photos (orientation 6). Decoding them all at once peaked at
+  // ~600 MB; one at a time stays far below the budget.
+  const iphone = await sharp({ create: { width: 4032, height: 3024, channels: 3, background: { r: 190, g: 140, b: 120 } } })
+    .jpeg({ quality: 92 }).withMetadata({ orientation: 6 }).toBuffer();
+  const photo = (name) => ({ buf: iphone, type: "image/jpeg", name });
+
+  let peak = process.memoryUsage().rss;
+  const sampler = setInterval(() => { peak = Math.max(peak, process.memoryUsage().rss); }, 5);
+  let res;
+  try {
+    res = await submit({ nakedEye: photo("clinical.jpg"), dermoscope: Array.from({ length: 7 }, (_, i) => photo(`d${i}.jpg`)) });
+  } finally {
+    clearInterval(sampler);
+  }
+  const body = await res.json();
+
+  assert.equal(res.status, 201, JSON.stringify(body));
+  assert.equal(body.success, true);
+  assert.equal(uploads.length, 8);
+  assert.equal((await Patient.findById(body.data._id).lean()).dermoscopePhotos.length, 7);
+  const peakMB = Math.round(peak / 1048576);
+  assert.ok(peakMB < 400, `peak RSS ${peakMB} MB — must stay well under Render's 512 MB`);
+});
+
 test("missing photos are still rejected with the existing message", async () => {
   const form = new FormData();
   for (const [k, v] of Object.entries({

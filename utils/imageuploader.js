@@ -2,6 +2,12 @@ const cloudinary = require("cloudinary").v2;
 const sharp = require("sharp");
 const fs = require("fs").promises;
 
+// The server has 512 MB and a fraction of a CPU, and decoding one phone photo
+// takes 100–300 MB. One libvips thread and no operation cache keep that per
+// image at its minimum; extra threads would only add memory, not speed.
+sharp.concurrency(1);
+sharp.cache(false);
+
 // Formats sharp can decode that we accept as clinical photos. Everything is
 // identified by magic bytes — the filename/extension/mimetype the browser
 // sends are ignored.
@@ -12,6 +18,10 @@ const MAX_INPUT_PIXELS = 50 * 1000 * 1000;
 const CLOUDINARY_MAX_BYTES = 10 * 1024 * 1024;
 const MIN_JPEG_QUALITY = 40;
 const MIN_DIMENSION = 500;
+// Longest edge we store. A standard 12 MP iPhone photo (4032x3024) passes
+// through at full size; 24/48 MP photos are scaled to ~12 MP. Without this
+// cap re-encoding one 48 MP photo takes ~500 MB, the whole Render instance.
+const MAX_DIMENSION = 4096;
 const HEIC_MESSAGE = "HEIC photos (the iPhone camera format) can't be processed. Please upload the photo as JPEG or PNG.";
 
 class ImageValidationError extends Error {
@@ -52,15 +62,66 @@ const sniff = async (path) => {
 // because we never call `.withMetadata()` the output carries no EXIF/IPTC/XMP
 // at all — no GPS coordinates, device model or timestamps. Rewriting the
 // container also discards anything hidden inside the original file.
-const reencode = async (inPath, outPath, { format, quality, width, height }) => {
-    let img = sharp(inPath, { limitInputPixels: MAX_INPUT_PIXELS }).rotate();
-    if (width || height) {
-        img = img.resize({ width, height, fit: "inside", withoutEnlargement: true });
-    }
+// Standard libjpeg-turbo encoding: mozjpeg/progressive saved ~20% of the
+// bytes but cost 8x the CPU, which on our fractional CPU meant minutes per case.
+const reencode = async (inPath, outPath, { format, quality, width = MAX_DIMENSION, height = MAX_DIMENSION }) => {
+    let img = sharp(inPath, { limitInputPixels: MAX_INPUT_PIXELS })
+        .rotate()
+        .resize({ width, height, fit: "inside", withoutEnlargement: true });
     img = format === "png"
         ? img.png({ compressionLevel: 9 })
-        : img.jpeg({ quality, progressive: true, mozjpeg: true });
+        : img.jpeg({ quality });
     return img.toFile(outPath); // { size, width, height, format }
+};
+
+// Sniffing and re-encoding run for one image at a time across the whole
+// process (every photo of every request, from every caller). Several photos
+// decoded at once used to push the server past 512 MB; it was killed
+// mid-request and the doctor's upload failed with no response at all.
+let imageQueue = Promise.resolve();
+const oneAtATime = (task) => {
+    const run = imageQueue.then(task);
+    imageQueue = run.catch(() => {});
+    return run;
+};
+
+// Writes a sanitised copy next to the upload and returns its path. Every
+// file written is added to `tempOutputs` for the caller to delete.
+const sanitise = async (inPath, tempOutputs) => {
+    const meta = await sniff(inPath);
+
+    // Lossless stays lossless; everything else becomes JPEG.
+    let format = meta.format === "png" ? "png" : "jpeg";
+    let outPath = `${inPath}.out.${format === "png" ? "png" : "jpg"}`;
+    tempOutputs.add(outPath);
+
+    let quality = 90;
+    let info = await reencode(inPath, outPath, { format, quality });
+
+    // Too big for Cloudinary: a PNG switches to JPEG, then quality drops,
+    // then dimensions shrink — same strategy as before, now applied
+    // after sanitising.
+    if (info.size > CLOUDINARY_MAX_BYTES && format === "png") {
+        format = "jpeg";
+        outPath = `${inPath}.out.jpg`;
+        tempOutputs.add(outPath);
+        info = await reencode(inPath, outPath, { format, quality });
+    }
+    while (info.size > CLOUDINARY_MAX_BYTES && quality > MIN_JPEG_QUALITY) {
+        quality -= 10;
+        info = await reencode(inPath, outPath, { format, quality });
+    }
+    let width = info.width;
+    let height = info.height;
+    while (info.size > CLOUDINARY_MAX_BYTES && width > MIN_DIMENSION) {
+        width = Math.floor(width * 0.8);
+        height = Math.floor(height * 0.8);
+        info = await reencode(inPath, outPath, { format, quality: 80, width, height });
+    }
+    if (info.size > CLOUDINARY_MAX_BYTES) {
+        throw new ImageValidationError("Image is too large even after compression. Please upload a smaller photo.");
+    }
+    return outPath;
 };
 
 /**
@@ -69,40 +130,11 @@ const reencode = async (inPath, outPath, { format, quality, width, height }) => 
  * minted per response by utils/imageAccess.js).
  */
 exports.uploadImageToCloudinary = async (file, folder) => {
-    const meta = await sniff(file.tempFilePath);
-
-    // Lossless stays lossless; everything else becomes JPEG.
-    let format = meta.format === "png" ? "png" : "jpeg";
-    let outPath = `${file.tempFilePath}.out.${format === "png" ? "png" : "jpg"}`;
-    const tempOutputs = new Set([outPath]);
-
+    const tempOutputs = new Set();
     try {
-        let quality = 90;
-        let info = await reencode(file.tempFilePath, outPath, { format, quality });
-
-        // Too big for Cloudinary: a PNG switches to JPEG, then quality drops,
-        // then dimensions shrink — same strategy as before, now applied
-        // after sanitising.
-        if (info.size > CLOUDINARY_MAX_BYTES && format === "png") {
-            format = "jpeg";
-            outPath = `${file.tempFilePath}.out.jpg`;
-            tempOutputs.add(outPath);
-            info = await reencode(file.tempFilePath, outPath, { format, quality });
-        }
-        while (info.size > CLOUDINARY_MAX_BYTES && quality > MIN_JPEG_QUALITY) {
-            quality -= 10;
-            info = await reencode(file.tempFilePath, outPath, { format, quality });
-        }
-        let width = info.width;
-        let height = info.height;
-        while (info.size > CLOUDINARY_MAX_BYTES && width > MIN_DIMENSION) {
-            width = Math.floor(width * 0.8);
-            height = Math.floor(height * 0.8);
-            info = await reencode(file.tempFilePath, outPath, { format, quality: 80, width, height });
-        }
-        if (info.size > CLOUDINARY_MAX_BYTES) {
-            throw new ImageValidationError("Image is too large even after compression. Please upload a smaller photo.");
-        }
+        // The upload itself is network-bound and stays outside the queue, so
+        // one photo uploads while the next is being processed.
+        const outPath = await oneAtATime(() => sanitise(file.tempFilePath, tempOutputs));
 
         const result = await cloudinary.uploader.upload(outPath, {
             folder,
